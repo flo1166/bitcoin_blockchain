@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import time
 import re
+from datetime import datetime
 
 # Read paths and list files
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
@@ -23,6 +24,23 @@ tx_ou_col = ['txid','indexOut','value','scriptPubKey','address']
 # Load illegal wallets
 illegalWallets = pd.read_csv('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\BABD-13 Bitcoin Address Behavior Dataset\BABD-13.csv', sep = ',')
 illegalWallets = illegalWallets[illegalWallets['label'] == 2]
+
+def list_walletexplorer(df: pd.Series):
+    list_temp = []
+
+    for i in df:
+        list_temp = list_temp + i.replace('"','').replace("'","").replace("[","").replace("]","").split(',')
+        list_temp = [x.strip(' ') for x in list_temp]
+    
+    return np.unique(list_temp).tolist()
+
+# Load Walletexplorer
+walletexplorer = pd.read_csv('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\walletexplorer\wallet_explorer_addresses.csv', sep = ',')
+
+walletexplorer1 = list_walletexplorer(walletexplorer['address_inc'])
+walletexplorer2 = list_walletexplorer(walletexplorer['address_out'])
+
+walletexplorer_addresses = pd.DataFrame(np.unique(walletexplorer1 + walletexplorer2))
 
 # Read and process
 #blocks = dd.read_csv('blocks-610600-615428.csv', sep = ';', names = block_col, assume_missing=True)
@@ -45,25 +63,30 @@ def data_quality_check(df, transactions):
     '''
     return len(df['txid'].unique().compute()) == len(transactions['txid'])
         
-def address_counter(tx_out, transactions):
+def address_counter(tx_out, tx_in, transactions):
     '''
     Counts the unique addresses in this data.
 
     Parameters
     ----------
     tx_out : DataFrame with transactions outflow (and addresses)
-    transactions : DataFrame with all txid (unique)
+    tx_in : DataFrame with transactions inflow
+    transactions : DataFrame with transaction ids
 
     Returns
     -------
-    Count of unique addresses in this data
+    cound_addresses : is the count of bitcoin addresses in the dataframe
+    count_transactions : is the count of transactions in the dataframe
 
     '''
-    count_unique = transactions[['txid']].merge(tx_out[['txid', 'address']], on = 'txid', how = 'left')['address'].unique().compute()
-    count_unique = len(count_unique)   
-    return count_unique
+    df = tx_in[['txid','hashPrevOut','indexPrevOut']].merge(tx_out[['txid','indexOut','address']], left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left').compute()
+    count_addresses = len(df['address'].unique())
+    count_transactions = len(df['txid_x'].unique())
+    if count_transactions != len(transactions['txid']):
+        raise Exception('The count of transactions from the table transactions does not match the count of transactions in tx_in. Check address_counter function.')
+    return count_addresses, count_transactions
 
-def sender_transactions(tx_in, tx_out, transactions, illegalWallets, illegalWalletsUnused, i):
+def sender_transactions(tx_in, tx_out, transactions, illegalWallets, illegalWalletsUnused, walletexplorer_addresses, i):
     '''
     Counts how many transactions per sender adress are there.
 
@@ -74,6 +97,7 @@ def sender_transactions(tx_in, tx_out, transactions, illegalWallets, illegalWall
     transactions : DataFrame with all txid (unique)
     illegalWallets : DataFrame with illegal flagged wallets
     illegalWalletsUnused : DataFrame with addreses which trade directly with illegal flagged addresses
+    wallet_send_transaction_count : list with unused
     i : current iterator
 
     Returns
@@ -81,26 +105,30 @@ def sender_transactions(tx_in, tx_out, transactions, illegalWallets, illegalWall
     Count of illegal flagged sender addresses in this data
     Count of illegal flagged sender transactions in this data
     Count of addresses which trade directly with illegal flagged sender addresses in this data
-    Count of addresses which trade directly with illegal flagged sender transactions in this data
-
+    Count of transactions which trade directly with illegal flagged sender transactions in this data
+    Count of addresses which were on walletexplorer
+    Count of transactions which were on walletexplorer
     '''
     if data_quality_check(tx_in, transactions):
         sender_transactions = tx_in[['txid','hashPrevOut','indexPrevOut']].merge(tx_out[['txid','indexOut','address']], left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left')['address'].value_counts().compute()
         sender_transactions = sender_transactions.reset_index()
-        #sender_transactions.to_csv(f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/output_python/sender_transaction_count_{i}', sep = ';')
+        #sender_transactions.to_csv(f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/output_python/sender_transaction_count_{i}.csv', sep = ';')
         sender_transactions_illegal = sender_transactions[sender_transactions.iloc[:,0].isin(illegalWallets['account'])]
         address_count = len(sender_transactions_illegal)
         transaction_count = sender_transactions_illegal.iloc[:,-1].sum()
         sender_transactions_illegal_unused = sender_transactions[sender_transactions.iloc[:,0].isin(illegalWalletsUnused['account'])]
         address_count_unused = len(sender_transactions_illegal_unused)
         transaction_count_unused = sender_transactions_illegal_unused.iloc[:,-1].sum()
+        sender_transactions_walletexplorer = sender_transactions[sender_transactions.iloc[:,0].isin(walletexplorer_addresses.iloc[:, 0])]
+        address_count_walletexplorer = len(sender_transactions_walletexplorer)
+        transaction_count_walletexplorer = sender_transactions_walletexplorer.iloc[:,-1].sum()
     else:
         raise Exception("txid from df doesn't match txid from transactions")
-        address_count, transaction_count = None
+        address_count, transaction_count, address_count_unused, transaction_count_unused, address_count_walletexplorer, transaction_count_walletexplorer = None
         
-    return address_count, transaction_count, address_count_unused, transaction_count_unused
+    return address_count, transaction_count, address_count_unused, transaction_count_unused, address_count_walletexplorer, transaction_count_walletexplorer
     
-def receiver_transactions(tx_out, transactions, illegalWallets, illegalWalletsUnused, i):
+def receiver_transactions(tx_out, transactions, illegalWallets, illegalWalletsUnused, walletexplorer_addresses, i):
     '''
     Counts how many transactions per receiver address and how many receiver are flagged.
 
@@ -118,23 +146,27 @@ def receiver_transactions(tx_out, transactions, illegalWallets, illegalWalletsUn
     Count of illegal flagged receiver transactions in this data
     Count of addresses which trade directly with illegal flagged receiver addresses in this data
     Count of addresses which trade directly with illegal flagged receiver transactions in this data
-
+    Count of addresses which were on walletexplorer
+    Count of transactions which were on walletexplorer
     '''
     if data_quality_check(tx_out, transactions):
         receiver_transactions = tx_out['address'].value_counts().compute()
         receiver_transactions = receiver_transactions.reset_index()
-        #receiver_transactions.to_csv(f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/output_python/receiver_transaction_count_{i}', sep = ';')
+        #receiver_transactions.to_csv(f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/output_python/receiver_transaction_count_{i}.csv', sep = ';')
         receiver_transactions_illegal = receiver_transactions[receiver_transactions.iloc[:,0].isin(illegalWallets['account'])]
         address_count = len(receiver_transactions_illegal)
         transaction_count = receiver_transactions_illegal.iloc[:,-1].sum()
         receiver_transactions_illegal_unused = receiver_transactions[receiver_transactions.iloc[:,0].isin(illegalWalletsUnused['account'])]
         address_count_unused = len(receiver_transactions_illegal_unused)
         transaction_count_unused = receiver_transactions_illegal_unused.iloc[:,-1].sum()
+        receiver_transactions_walletexplorer = receiver_transactions[receiver_transactions.iloc[:,0].isin(walletexplorer_addresses.iloc[:, 0])]
+        address_count_walletexplorer = len(receiver_transactions_walletexplorer)
+        transaction_count_walletexplorer = receiver_transactions_walletexplorer.iloc[:,-1].sum()
     else:
         raise Exception("txid from df doesn't match txid from transactions")
-        address_count, transaction_count = None
+        address_count, transaction_count, address_count_unused, transaction_count_unused, address_count_walletexplorer, transaction_count_walletexplorer = None
     
-    return address_count, transaction_count, address_count_unused, transaction_count_unused
+    return address_count, transaction_count, address_count_unused, transaction_count_unused, address_count_walletexplorer, transaction_count_walletexplorer
 
 # Here we check if illegal flagged transactions bitcoin addresses are in illegalWallets
 def filereader(files_transactions, files_tx_in, files_tx_out, i):
@@ -187,24 +219,32 @@ def illegalWalletsCheck(tx_in, tx_out, illegalWallets, i):
     print(i, 'Anzahl illegaler Adressen durch illegale Transaktionen:', len(tx_in_out_illegal_address), '\nAnzahl der Adressen aus den illegalen Transaktionen die in illegalWallets sind:', tx_in_out_illegal_address[0].isin(illegalWallets['account']).sum())
     tx_in_out_illegal_address[~tx_in_out_illegal_address[0].isin(illegalWallets['account'])].to_csv(f'unusedAddressesInIllegalTransactions{i}.csv', sep = ';')
 
+def walletexplorer_counter(tx_in, tx_out, walletexplorer_total, walletexplorer_sender, walletexplorer_receiver, i):
+    tx_in_merged = tx_in[['txid','hashPrevOut','indexPrevOut']].merge(tx_out[['txid','indexOut','address']], left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left').compute()
+
 # Main loop to get address and transaction count of all months in 2020
 for i in range(len(files_transactions)):
     st = time.time()
     
     transactions, tx_in, tx_out = filereader(files_transactions, files_tx_in, files_tx_out, i)
     illegalWalletsUnused = pd.read_csv(files_unused_illegalWallets[i], sep = ';', names = ['account'])
-    result_df.loc[i, 'transactions_count'] = len(transactions['txid'])
-    result_df.loc[i, 'address_count'] = address_counter(tx_out, transactions)
-    address_count, transaction_count, address_count_unused, transaction_count_unused = sender_transactions(tx_in, tx_out, transactions, illegalWallets, illegalWalletsUnused, i)
+    count_addresses, count_transactions = address_counter(tx_out, tx_in, transactions)
+    result_df.loc[i, 'transactions_count'] = count_transactions
+    result_df.loc[i, 'address_count'] = count_addresses
+    address_count, transaction_count, address_count_unused, transaction_count_unused, address_count_walletexplorer, transaction_count_walletexplorer = sender_transactions(tx_in, tx_out, transactions, illegalWallets, illegalWalletsUnused, walletexplorer_addresses, i)
     result_df.loc[i, 'sender_addresses_flagged_count'] = address_count
     result_df.loc[i, 'sender_transactions_flagged_count'] = transaction_count
     result_df.loc[i, 'sender_addresses_flagged_count_unused'] = address_count_unused
     result_df.loc[i, 'sender_transactions_flagged_count_unused'] = transaction_count_unused
-    address_count, transaction_count, address_count_unused, transaction_count_unused = receiver_transactions(tx_out, transactions, illegalWallets, illegalWalletsUnused, i)
+    result_df.loc[i, 'sender_addresses_flagged_count_walletexplorer'] = address_count_walletexplorer
+    result_df.loc[i, 'sender_transactions_flagged_count_walletexplorer'] = transaction_count_walletexplorer
+    address_count, transaction_count, address_count_unused, transaction_count_unused, address_count_walletexplorer, transaction_count_walletexplorer  = receiver_transactions(tx_out, transactions, illegalWallets, illegalWalletsUnused, walletexplorer_addresses, i)
     result_df.loc[i, 'receiver_addresses_flagged_count'] = address_count
     result_df.loc[i, 'receiver_transactions_flagged_count'] = transaction_count
     result_df.loc[i, 'receiver_addresses_flagged_count_unused'] = address_count_unused
     result_df.loc[i, 'receiver_transactions_flagged_count_unused'] = transaction_count_unused
+    result_df.loc[i, 'receiver_addresses_flagged_count_walletexplorer'] = address_count_walletexplorer
+    result_df.loc[i, 'receiver_transactions_flagged_count_walletexplorer'] = transaction_count_walletexplorer
     #print('Anzahl der Transaktionen:', len(transactions['txid']))
     #sender_transactions = tx_in[['txid','hashPrevOut','indexPrevOut']].merge(tx_out[['txid','indexOut','address']], left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left')['address'].value_counts().compute()
     #print('Anzahl der Sender-Transaktionen pro Bitcoin Adresse:', sender_transactions)
@@ -217,7 +257,7 @@ for i in range(len(files_transactions)):
     #receiver_flagged = receiver_transactions[receiver_transactions.iloc[:,0].isin(illegalWallets['account'])].iloc[:,-1].sum()
     #print('Anzahl der geflaggten Empfänger-Adressen in Transaktionen:', receiver_flagged, 'Share is:', np.round(receiver_flagged / len(transactions['txid']) * 10000) / 100, '%')
     en = time.time()
-    print(en - st)
+    print(datetime.now(), en - st)
 
 # write the data to wd
 result_df.to_excel('result_df.xlsx')
