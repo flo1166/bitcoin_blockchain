@@ -26,6 +26,11 @@ tx_ou_col = ['txid','indexOut','value','scriptPubKey','address']
 # naming for saving csv file
 partition_name = '610682-615423'
 
+# btc exchange rates for 2020
+btc_exchange_rate_2020 = pd.read_csv('btc_eur_wechselkurs.csv', sep = ';' , thousands='.', decimal=',', usecols = ['Schlusskurs'])
+btc_exchange_rate_2020 = btc_exchange_rate_2020.set_index(pd.to_datetime(pd.read_csv('btc_eur_wechselkurs.csv', sep = ';', usecols = ['Datum'])['Datum'], dayfirst = True).dt.strftime('%Y-%m-%d'))
+btc_exchange_rate_2020 = btc_exchange_rate_2020['Schlusskurs'].to_dict()
+
 def unix_in_datetime(unixtime):
     '''
     This funciton converts a unix timestamp (in blocks) into datetime
@@ -222,7 +227,7 @@ def count_transactions(tx_in, tx_out, transactions_reward, new = False):
 
 #print(str(timedelta(seconds=timeit.timeit(stmt='count_transactions()', globals=globals(), number=1))))
 
-def lifetime_address(tx_in, tx_out):
+def lifetime_address(tx_in, tx_out, partition_name):
     '''
     This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 5h)
 
@@ -248,39 +253,158 @@ def lifetime_address(tx_in, tx_out):
     df.to_csv(filename = f'final_lifetime_address_{partition_name}.csv', sep = ';', single_file = True, index=False) 
 
 #with ProgressBar():
-#    test = lifetime_address(tx_in, tx_out)
+#    test = lifetime_address(tx_in, tx_out, partition_name)
 
 # Check if df length is ok
 #check_df_length('final_lifetime_address_610682-615423', 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_lifetime_address_610682-615423.csv')
 
-def sum_transaction_value_btc(tx_in, tx_out):
+def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
     '''
-    This function calculates the sum of the transaction value in btc per address (Runtime: )
+    This function calculates the sum of the transaction value in btc per address (Runtime: 10 Minuten)
 
     Parameters
     ----------
     tx_in : Sender transactions
     tx_out : Receiver transactions
+    partition_name : The height of the blocks for the investigated month
+    euro : if in euro (true) or btc (false)
     
     Returns
     -------
     CSV files with value of all transactions, sender transactions, receiver transactions
 
     '''
-    tx_in.groupby('address')['value'].sum()\
-        .to_csv(filename = f'final_sum_transaction_value_sender_{partition_name}.csv', sep = ';', single_file = True, index=False) 
-    tx_out.groupby('address')['value'].sum()\
-        .to_csv(filename = f'final_sum_transaction_value_receiver_{partition_name}.csv', sep = ';', single_file = True, index=False) 
+    filename_all = f'final_sum_transaction_value_all_{partition_name}.csv'
+    filename_sender = f'final_sum_transaction_value_sender_{partition_name}.csv'
+    filename_receiver = f'final_sum_transaction_value_receiver_{partition_name}.csv'
+    
+    if euro:
+        tx_in['nTime'] = dd.to_datetime(tx_in['nTime']).dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
+        tx_out['nTime'] = dd.to_datetime(tx_out['nTime']).dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
+        tx_in['value'] = tx_in['value'] / 100000000 * tx_in['nTime']
+        tx_out['value'] = tx_out['value'] / 100000000 * tx_out['nTime']
+        filename_all = f'final_sum_transaction_value_all_euro_{partition_name}.csv'
+        filename_sender = f'final_sum_transaction_value_sender_euro_{partition_name}.csv'
+        filename_receiver = f'final_sum_transaction_value_receiver_euro_{partition_name}.csv'
+    
+    tx_in.groupby('address')['value'].sum().reset_index()\
+        .to_csv(filename = filename_sender, sep = ';', single_file = True, index=False) 
+    tx_out.groupby('address')['value'].sum().reset_index()\
+        .to_csv(filename = filename_receiver, sep = ';', single_file = True, index=False)
     df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
-    df.groupby('address')['value'].sum()\
-        .to_csv(filename = f'final_sum_transaction_value_all_{partition_name}.csv', sep = ';', single_file = True, index=False) 
+    df.groupby('address')['value'].sum().reset_index()\
+        .to_csv(filename = filename_all, sep = ';', single_file = True, index=False)
 
 #with ProgressBar():
-#    sum_transaction_value_btc(tx_in, tx_out)
+#    sum_transaction_value_btc(tx_in, tx_out, partition_name)
 
 # Check if df length is ok
 #check_df_length(f'final_sum_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_sender_{partition_name}.csv')
 #check_df_length(f'final_sum_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_receiver_{partition_name}.csv')
 #check_df_length(f'final_sum_transaction_value_all_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_all_{partition_name}.csv')
 
+#with ProgressBar():
+#    sum_transaction_value_btc(tx_in, tx_out, partition_name, True)
+
+# Check if df length is ok
+#check_df_length(f'final_sum_transaction_value_sender_euro_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_sender_euro_{partition_name}.csv')
+#check_df_length(f'final_sum_transaction_value_receiver_euro_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_receiver_euro_{partition_name}.csv')
+#check_df_length(f'final_sum_transaction_value_all_euro_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_all_euro_{partition_name}.csv')
+
+def max_min_transaction_value_btc(tx_in, tx_out, partition_name, max = True):
+    '''
+    This functions calculates either max nor minimum transaction value of an address (Runtime: 10 Minuten)
+
+    Parameters
+    ----------
+    tx_in : Sender transactions
+    tx_out : Receiver transactions
+    partition_name : The height of the blocks for the investigated month
+    max : if maximum (true) or minium (false) should be calculated
+
+    Returns
+    -------
+    CSV-files with maximum and minimum by all, sender or receiver transactions
+
+    '''
+    filename_all = f'final_max_transaction_value_all_{partition_name}.csv'
+    filename_sender = f'final_max_transaction_value_sender_{partition_name}.csv'
+    filename_receiver = f'final_max_transaction_value_receiver_{partition_name}.csv'
+    
+    if max:
+        tx_in.groupby('address')['value'].max().reset_index()\
+            .to_csv(filename = filename_sender, sep = ';', single_file = True, index=False) 
+        tx_out.groupby('address')['value'].max().reset_index()\
+            .to_csv(filename = filename_receiver, sep = ';', single_file = True, index=False) 
+        df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
+        df.groupby('address')['value'].max().reset_index()\
+            .to_csv(filename = filename_all, sep = ';', single_file = True, index=False)
+    else:
+        filename_all = f'final_min_transaction_value_all_{partition_name}.csv'
+        filename_sender = f'final_min_transaction_value_sender_{partition_name}.csv'
+        filename_receiver = f'final_min_transaction_value_receiver_{partition_name}.csv'
+        tx_in.groupby('address')['value'].min().reset_index()\
+            .to_csv(filename = filename_sender, sep = ';', single_file = True, index=False) 
+        tx_out.groupby('address')['value'].min().reset_index()\
+            .to_csv(filename = filename_receiver, sep = ';', single_file = True, index=False) 
+        df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
+        df.groupby('address')['value'].min().reset_index()\
+            .to_csv(filename = filename_all, sep = ';', single_file = True, index=False)
+
+#with ProgressBar():
+#    max_min_transaction_value_btc(tx_in, tx_out, partition_name)
+#    max_min_transaction_value_btc(tx_in, tx_out, partition_name, False)
+
+# Check if df length is ok
+#check_df_length(f'final_max_transaction_value_all_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_max_transaction_value_all_{partition_name}.csv')
+#check_df_length(f'final_max_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_max_transaction_value_receiver_{partition_name}.csv')
+#check_df_length(f'final_max_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_max_transaction_value_sender_{partition_name}.csv')
+#check_df_length(f'final_min_transaction_value_all_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_min_transaction_value_all_{partition_name}.csv')
+#check_df_length(f'final_min_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_min_transaction_value_receiver_{partition_name}.csv')
+#check_df_length(f'final_min_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_min_transaction_value_sender_{partition_name}.csv')
+
+def transaction_fee(tx_in, tx_out, partition_name):
+    '''
+    This function calculates the transaction fees (Runtime: 54 Minuten)
+
+    Parameters
+    ----------
+    tx_in : Sender transactions
+    tx_out : Receiver transactions
+    partition_name : The height of the blocks for the investigated month
+    
+    Returns
+    -------
+    CSV file with transaction fees
+
+    '''
+    filename_all = f'final_transaction_fee_{partition_name}.csv'
+    filename_sender = f'final_transaction_fee_sender_{partition_name}.csv'
+    filename_receiver = f'final_transaction_fee_receiver_{partition_name}.csv'
+    
+    df_fee = tx_in.groupby('txid')['value'].sum().reset_index().merge(tx_out.groupby('txid')['value'].sum().reset_index(), on = 'txid', how = 'left')
+    df_fee['fee'] = df_fee['value_x'] - df_fee['value_y']
+    df_fee = df_fee[['txid', 'fee']]
+
+    tx_in.merge(df_fee, on = 'txid', how = 'left')\
+        .groupby('address')['fee'].sum().reset_index()\
+            .to_csv(filename = filename_sender, sep = ';', single_file = True, index=False)
+    
+    tx_out.merge(df_fee, on = 'txid', how = 'left')\
+        .groupby('address')['fee'].sum().reset_index()\
+            .to_csv(filename = filename_receiver, sep = ';', single_file = True, index=False)
+
+    df = dd.concat([tx_in[['txid', 'address', 'value']], tx_out[['txid', 'address', 'value']]], axis = 0)
+    df = df.merge(df_fee, on = 'txid', how = 'left')
+    df.groupby('address')['fee'].sum().reset_index()\
+        .to_csv(filename = filename_all, sep = ';', single_file = True, index=False)
+    
+ #with ProgressBar():
+ #    transaction_fee(tx_in, tx_out, partition_name)
+
+ # Check if df length is ok
+ #check_df_length(f'final_transaction_fee_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_transaction_fee_{partition_name}.csv)
+ #check_df_length(f'final_transaction_fee_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_transaction_fee_sender_{partition_name}.csv)
+ #check_df_length(f'final_transaction_fee_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_transaction_fee_receiver_{partition_name}.csv)
+    
     
