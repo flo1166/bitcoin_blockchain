@@ -7,6 +7,7 @@ import re
 from datetime import datetime
 import timeit
 from dask.diagnostics import ProgressBar
+import itertools
 
 # Read paths and list files
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
@@ -258,6 +259,28 @@ def lifetime_address(tx_in, tx_out, partition_name):
 # Check if df length is ok
 #check_df_length('final_lifetime_address_610682-615423', 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_lifetime_address_610682-615423.csv')
 
+def helper_exchange_rate(tx_in, tx_out):
+    '''
+    This function converts tx_in and tx_out from btc to euro
+
+    Parameters
+    ----------
+    tx_in : Sender transactions with value in btc
+    tx_out : Receiver transactions with value in btc
+
+    Returns
+    -------
+    tx_in : Sender transactions with value in euro
+    tx_out : Receiver transactions with value in euro
+
+    '''
+    tx_in['nTime'] = dd.to_datetime(tx_in['nTime']).dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
+    tx_out['nTime'] = dd.to_datetime(tx_out['nTime']).dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
+    tx_in['value'] = tx_in['value'] / 100000000 * tx_in['nTime']
+    tx_out['value'] = tx_out['value'] / 100000000 * tx_out['nTime']
+    return tx_in, tx_out
+
+
 def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
     '''
     This function calculates the sum of the transaction value in btc per address (Runtime: 10 Minuten)
@@ -279,10 +302,7 @@ def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
     filename_receiver = f'final_sum_transaction_value_receiver_{partition_name}.csv'
     
     if euro:
-        tx_in['nTime'] = dd.to_datetime(tx_in['nTime']).dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
-        tx_out['nTime'] = dd.to_datetime(tx_out['nTime']).dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
-        tx_in['value'] = tx_in['value'] / 100000000 * tx_in['nTime']
-        tx_out['value'] = tx_out['value'] / 100000000 * tx_out['nTime']
+        tx_in, tx_out = helper_exchange_rate(tx_in, tx_out)
         filename_all = f'final_sum_transaction_value_all_euro_{partition_name}.csv'
         filename_sender = f'final_sum_transaction_value_sender_euro_{partition_name}.csv'
         filename_receiver = f'final_sum_transaction_value_receiver_euro_{partition_name}.csv'
@@ -363,6 +383,25 @@ def max_min_transaction_value_btc(tx_in, tx_out, partition_name, max = True):
 #check_df_length(f'final_min_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_min_transaction_value_receiver_{partition_name}.csv')
 #check_df_length(f'final_min_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_min_transaction_value_sender_{partition_name}.csv')
 
+def helper_transaction_fee(df, df_fee, filename):
+    '''
+    This is the helper function for the funciton transaction fee to shorten the code
+
+    Parameters
+    ----------
+    df : Dataframe to process
+    df_fee : Dataframe with fees
+    filename : Name to output as csv file
+
+    Returns
+    -------
+    CSV file with transaction fees
+
+    '''
+    df.merge(df_fee, on = 'txid', how = 'left')\
+        .groupby('address')['fee'].sum().reset_index()\
+            .to_csv(filename = filename, sep = ';', single_file = True, index=False)
+
 def transaction_fee(tx_in, tx_out, partition_name):
     '''
     This function calculates the transaction fees (Runtime: 54 Minuten)
@@ -385,19 +424,12 @@ def transaction_fee(tx_in, tx_out, partition_name):
     df_fee = tx_in.groupby('txid')['value'].sum().reset_index().merge(tx_out.groupby('txid')['value'].sum().reset_index(), on = 'txid', how = 'left')
     df_fee['fee'] = df_fee['value_x'] - df_fee['value_y']
     df_fee = df_fee[['txid', 'fee']]
-
-    tx_in.merge(df_fee, on = 'txid', how = 'left')\
-        .groupby('address')['fee'].sum().reset_index()\
-            .to_csv(filename = filename_sender, sep = ';', single_file = True, index=False)
     
-    tx_out.merge(df_fee, on = 'txid', how = 'left')\
-        .groupby('address')['fee'].sum().reset_index()\
-            .to_csv(filename = filename_receiver, sep = ';', single_file = True, index=False)
-
+    helper_transaction_fee(tx_in, df_fee, filename_sender)
+    helper_transaction_fee(tx_out, df_fee, filename_receiver)
+    
     df = dd.concat([tx_in[['txid', 'address', 'value']], tx_out[['txid', 'address', 'value']]], axis = 0)
-    df = df.merge(df_fee, on = 'txid', how = 'left')
-    df.groupby('address')['fee'].sum().reset_index()\
-        .to_csv(filename = filename_all, sep = ';', single_file = True, index=False)
+    helper_transaction_fee(df, df_fee, filename_all)
     
  #with ProgressBar():
  #    transaction_fee(tx_in, tx_out, partition_name)
@@ -406,5 +438,184 @@ def transaction_fee(tx_in, tx_out, partition_name):
  #check_df_length(f'final_transaction_fee_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_transaction_fee_{partition_name}.csv)
  #check_df_length(f'final_transaction_fee_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_transaction_fee_sender_{partition_name}.csv)
  #check_df_length(f'final_transaction_fee_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_transaction_fee_receiver_{partition_name}.csv)
+
+def helper_time_transactions(df, filename):
+    '''
+    This function helps the time_transactions function to calculate the difference in time and output the standard deviation of it
+
+    Parameters
+    ----------
+    df : Dataframe to process
+    filename : Filename for CSV output
+
+    Returns
+    -------
+    CSV file with time differences per transactions described through standard deviation
+
+    '''
+    df = df[['address', 'nTime']]
+    df['nTime'] = dd.to_datetime(df['nTime'])
+    df = df.dropna(subset=['address']).sort_values(['address', 'nTime']).reset_index(drop = True)
+    # NOT WORKING
+    df = dd.concat([df['address'], df.groupby('address')['nTime'].apply(lambda x: x.diff().dt.days, meta = ('diff', 'float64'))], axis = 1)
+    df = df.groupby('address')['diff'].std()
+    return df
+    "Concatenated DataFrames of different lengths"
+    #return df.groupby('address')['diff'].std().head()#.reset_index().to_csv(filename = filename, sep = ';', single_file = True, index=False)
+
+def time_transactions(tx_in, tx_out, partition_name):
+    '''
+    This function calculates the difference in time per transaction per address and the standard deviation of it
+
+    Parameters
+    ----------
+    tx_in : Sender transactions
+    tx_out : Receiver transactions
+    partition_name : The height of the blocks for the investigated month
+
+    Returns
+    -------
+    CSV file with time differences per transactions described through standard deviation
+
+    '''
+    filename_all_std = f'final_transaction_time_std_{partition_name}.csv'
+    filename_sender_std = f'final_transaction_time_std_sender_{partition_name}.csv'
+    filename_receiver_std = f'final_transaction_time_std_receiver_{partition_name}.csv'
+    # NOT READY
+    helper_time_transactions(tx_in, filename_sender_std)
+    helper_time_transactions(tx_out, filename_receiver_std)
+    # NOT READY
+    df = dd.concat([tx_in[['txid', 'address', 'nTime']], tx_out[['txid', 'address', 'nTime']]], axis = 0)
     
+    helper_time_transactions(df, filename_all_std)
+
+def std_transaction_value(tx_in, tx_out, partition_name):
+    '''
+    This fuction calculates the standard deviation from the transaction value, regarding the sender, the receiver and all transactions
+
+    Parameters
+    ----------
+    tx_in : Sender transactions
+    tx_out : Receiver transactions
+    partition_name : The height of the blocks for the investigated month
     
+    Returns
+    -------
+    CSV files with the standard deviation of the transaction value from sender, receiver and all transactions
+
+    '''
+    filename_all = f'final_std_transaction_value_all_{partition_name}.csv'
+    filename_sender = f'final_std_transaction_value_sender_{partition_name}.csv'
+    filename_receiver = f'final_std_transaction_value_receiver_{partition_name}.csv'
+    
+    tx_in.groupby('address')['value'].std().reset_index()\
+        .to_csv(filename = filename_sender, sep = ';', single_file = True, index=False) 
+    tx_out.groupby('address')['value'].std().reset_index()\
+        .to_csv(filename = filename_receiver, sep = ';', single_file = True, index=False)
+    df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
+    df.groupby('address')['value'].std().reset_index()\
+        .to_csv(filename = filename_all, sep = ';', single_file = True, index=False)
+        
+ #with ProgressBar():
+ #    std_transaction_value(tx_in, tx_out, partition_name)
+
+ # Check if df length is ok
+ #check_df_length(f'final_std_transaction_value_all_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_std_transaction_value_all_{partition_name}.csv)
+ #check_df_length(f'final_std_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_std_transaction_value_sender_{partition_name}.csv)
+ #check_df_length(f'final_std_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_std_transaction_value_receiver_{partition_name}.csv'.csv)
+
+def helper_count_addresses(df, filename):
+    '''
+    This function helps the count_addresses function to determine the count of unique addresses per address in dataframe
+
+    Parameters
+    ----------
+    df : Dataframe to process
+    filename : Filename for CSV output
+
+
+    Returns
+    -------
+    CSV-file with the count of unique addresses per address (excluded the own address)
+
+    '''
+    df.groupby('txid')['address'].apply(list, meta = ('address', 'object')).reset_index().to_csv('map_txid_addresses.csv', sep = ';', single_file = True, index = False)
+    # NOT WORKING
+    df[['txid', 'address']].merge(dd.read_csv('map_txid_addresses.csv', sep = ';', assume_missing = True), on = 'txid', how = 'left')\
+        .groupby('address_x')['address_y'].apply(lambda x: x.strip("']['").replace("'", "").split(', '))\
+            .apply(list, meta = ('address_y', 'object'))\
+                .apply(lambda x: len(set(list(itertools.chain(*x)))) - 1, meta=('unique_address', 'object'))\
+                    .reset_index().rename(columns = {'address_x': 'address'})\
+                        .to_csv(filename = filename, sep = ';', single_file = True, index=False) 
+    # df = df[['txid', 'address']].merge(dd.read_csv('map_txid_addresses.csv', sep = ';', assume_missing = True), on = 'txid', how = 'left').groupby('address_x')['address_y'].apply(list, meta = ('address_y', 'object'))
+    #df = df.str.strip("']['").str.replace("'", "").str.split(', ')
+
+def count_addresses(tx_in, tx_out, partition_name):
+    '''
+    This fuction counts the unique addresses in sender, receiver and all transactions
+
+    Parameters
+    ----------
+    tx_in : Sender transactions
+    tx_out : Receiver transactions
+    partition_name : The height of the blocks for the investigated month
+    
+    Returns
+    -------
+    CSV files with the count of addresses from unique senders, receivers and all transactions
+
+    '''
+    filename_all = f'final_count_addresses_all_{partition_name}.csv'
+    filename_sender = f'final_count_addresses_sender_{partition_name}.csv'
+    filename_receiver = f'final_count_addresses_receiver_{partition_name}.csv'
+    # NOT WORKING
+    helper_count_addresses(tx_in, filename_sender)
+    helper_count_addresses(tx_out, filename_receiver)
+    # NOT WORKING
+    df = dd.concat([tx_in[['txid', 'address']], tx_out[['txid', 'address']]], axis = 0)
+    helper_count_addresses(df, filename_all)
+    
+'''
+    def helper_count_addresses(df, filename):
+        
+        This function helps the count_addresses function to determine the count of unique addresses per address in dataframe
+
+        Parameters
+        ----------
+        df : Dataframe to process
+        filename : Filename for CSV output
+
+
+        Returns
+        -------
+        CSV-file with the count of unique addresses per address (excluded the own address)
+
+        
+        #df.groupby('txid')['address'].apply(list, meta = ('address', 'object')).reset_index().to_csv('map_txid_addresses.csv', sep = ';', single_file = True, index = False)
+
+        return df[['txid', 'address']].merge(dd.read_csv('map_txid_addresses.csv', sep = ';', assume_missing = True), on = 'txid', how = 'left').groupby('address_x')['address_y'].apply(lambda x: x.strip("']['").replace("'", "").split(', '), meta = ('address_y', 'object')).head()
+'''
+
+def balance(tx_in, tx_out, partition_name):
+    '''
+    This function generates the balance after each transaction
+
+    Parameters
+    ----------
+    tx_in : Sender transactions
+    tx_out : Receiver transactions
+    partition_name : The height of the blocks for the investigated month
+
+    Returns
+    -------
+    CSV-files with the mean and standard deviation of the balance
+
+    '''
+    df = dd.concat([tx_in[['txid', 'address', 'value']], tx_out[['txid', 'address', 'value']]], axis = 0)
+    df = df.groupby(['address', 'txid']).sum().reset_index()
+    df_add = df.groupby('address')['value'].cumsum()
+    df = dd.concat([df, df_add], axis = 1)
+    return df.head(100)
+    
+
+   
