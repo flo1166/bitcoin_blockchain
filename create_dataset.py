@@ -8,6 +8,7 @@ from datetime import datetime
 import timeit
 from dask.diagnostics import ProgressBar
 import itertools
+import glob
 
 # Read paths and list files
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
@@ -71,8 +72,8 @@ def filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, i, n
         tx_in = dd.read_csv(files_tx_in[i], sep = ';', names = tx_in_col, usecols = tx_in_col[:3], assume_missing=True)
         tx_out = dd.read_csv(files_tx_out[i], sep = ';', names = tx_ou_col, usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], assume_missing=True)
     else:
-        tx_in = dd.read_csv(f'new/{files_tx_in[i]}', sep = ';', assume_missing=True)
-        tx_out = dd.read_csv(f'new/{files_tx_out[i]}', sep = ';', assume_missing=True)
+        tx_in = dd.read_json(glob.glob(f'new/tx_in-{partition_name}_new.json/*.part'), orient = 'records', convert_dates = ['nTime'])
+        tx_out = dd.read_json(glob.glob(f'new/tx_out-{partition_name}_new.json/*.part'), orient = 'records', convert_dates = ['nTime'])
     return blocks, transactions, tx_in, tx_out
 
 #blocks, transactions, tx_in, tx_out = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 0)
@@ -94,17 +95,17 @@ def check_df_length(filename, directory = None):
     '''
     with ProgressBar():
         if directory == None:
-            df = dd.read_csv(f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/new/{filename}.csv', sep = ';', assume_missing = True)
+            df = dd.read_json(glob.glob(f'new/{filename}.json/*.part'), orient = 'records')
         else:
-            df = dd.read_csv(directory, sep = ';', assume_missing = True)
+            df = dd.read_json(glob.glob(directory), orient = 'records')
         print(filename)
         print(len(df))
         print(df.isnull().sum().compute())
-
+        print(df.head())
 
 def build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, filename):
     '''
-    This builds the tx_in file with all informations needed
+    This builds the tx_in file with all informations needed (Runtime: 10 Minuten)
 
     Parameters
     ----------
@@ -117,10 +118,10 @@ def build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, filena
 
     Returns
     -------
-    csv file saved in tx_out_filesplit
+    json files saved in tx_out_filesplit
 
     '''
-    current_save_directory = f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/new/tx_in-{filename}.csv'
+    current_save_directory = f'new/tx_in-{filename}.json'
     
     current_df = tx_in[~tx_in['txid'].isin(transactions_reward)]\
         .merge(tx_out, left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left')[['txid_x','indexOut', 'value', 'address']]\
@@ -129,8 +130,9 @@ def build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, filena
                     .merge(blocks, left_on = 'hashBlock', right_on = 'block_hash', how = 'left')[['txid','indexOut', 'value', 'address', 'nTime']]
     
     current_df['nTime'] = current_df['nTime'].apply(lambda x: unix_in_datetime(x), meta=('nTime_datetime', 'datetime64[ns]'))
+    current_df['value'] = abs(current_df['value']) / 100000000
     
-    current_df.to_csv(filename = current_save_directory, sep = ';', single_file = True, index=False)
+    current_df.to_json(current_save_directory, orient = 'records')
 
 #with ProgressBar():
 #    build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, '610682-615423_new')
@@ -140,7 +142,7 @@ def build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, filena
 
 def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
     '''
-    This builds the tx_in file with all informations needed
+    This builds the tx_in file with all informations needed (Runtime: 6 Minuten)
 
     Parameters
     ----------
@@ -152,18 +154,19 @@ def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
 
     Returns
     -------
-    csv file saved in tx_out_filesplit
+    json files saved in tx_out_filesplit
 
     '''
-    current_save_directory = f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/new/tx_out-{filename}.csv'
+    current_save_directory = f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/new/tx_out-{filename}.json'
     
     current_df = tx_out[~tx_out['txid'].isin(transactions_reward)]\
         .merge(transactions, on = 'txid', how = 'left')\
             .merge(blocks, left_on = 'hashBlock', right_on = 'block_hash', how = 'left')[['txid','indexOut', 'value', 'address', 'nTime']]
     
     current_df['nTime'] = current_df['nTime'].apply(lambda x: unix_in_datetime(x), meta=('nTime_datetime', 'datetime64[ns]'))
+    current_df['value'] = abs(current_df['value']) / 100000000
     
-    current_df.to_csv(filename = current_save_directory, sep = ';', single_file = True, index=False)
+    current_df.to_json(current_save_directory, orient = 'records')
 
 #with ProgressBar():
 #    build_tx_out(tx_out, transactions, blocks, transactions_reward, '610682-615423_new')
@@ -176,61 +179,52 @@ def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
 # Um Adresse von tx_in zu erhalten, muss tx_out verbunden werden, da in tx_in nur Informationen zu der vorhergehenden Transaktion und index ist:
 # tx_in[~tx_in['txid'].isin(transactions_reward)].merge(tx_out, left_on = ['hash_prev_out', 'index_prev_out'], right_on = ['txid', 'indexOut'])
 
-files_filepath = os.listdir('C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/new')
-files_tx_in_new = list(filter(re.compile(r"tx_in-.*").match, files_filepath))
-files_tx_out_new = list(filter(re.compile(r"tx_out-.*").match, files_filepath))
-blocks, transactions, tx_in, tx_out = filereader(files_blocks, files_transactions, files_tx_in_new, files_tx_out_new, 0, True)
+blocks, transactions, tx_in, tx_out = filereader(files_blocks, files_transactions, None, None, 0, True)
 
-def count_transactions(tx_in, tx_out, transactions_reward, new = False):
+def count_transactions(tx_in, tx_out, partition_name):
     '''
-    This Function counts transactions per bitcoin address (Runtime: 30 Min).
+    This Function counts transactions per bitcoin address (Runtime: 60 Min).
 
     Parameters
     ----------
-    tx_in : is the CSV file with incoming addresses of a transaction of the bitcoin blockchain
-    tx_out : is the CSV file with outcoming addresses of a transaction of the bitcoin blockchain
+    tx_in : Sender transactions
+    tx_out : Receiver transactions
+    partition_name : The height of the blocks for the investigated month
 
     Returns
     -------
-    Count_Transactions : count of transactions of all transactions the address is involved
-    Count_Sender_Transaction : count of transactions of sender transactions the address is involved
-    Count_Receiver_Transaction : count of transactions of receiver transactions the address is involved
-    Count_Receiver_equal_Sender : count of transactions of sender equals the receiver transactions the address is involved
+    JSON-files with the count of transactions the address is involved, seperated by sender, receiver, all and sender = receiver transactions
 
     '''
-    if not new:
-        Sender_Adress = tx_in[~tx_in['txid'].isin(transactions_reward)].merge(tx_out, left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left')
-        Receiver_Adress = tx_out[~tx_out['txid'].isin(transactions_reward)]
-        Count_Sender_Transaction = Sender_Adress.groupby(['address','txid_x']).count()\
-            .reset_index()['address'].value_counts(sort = False).reset_index().compute()
-        Count_Receiver_Transaction = Receiver_Adress.groupby(['address','txid']).count()\
-            .reset_index()['address'].value_counts(sort = False).reset_index().compute()
-        df_receiver_equal_sender = Sender_Adress[['txid_x', 'address']].merge(Receiver_Adress[['txid', 'address']], left_on = 'txid_x', right_on = 'txid', how = 'inner')
-        Count_Receiver_equal_Sender = df_receiver_equal_sender[df_receiver_equal_sender['address_x'] == df_receiver_equal_sender['address_y']].groupby(['txid_x', 'address_x']).count()\
-            .reset_index()['address_x'].value_counts().reset_index().rename(columns = {'address_x': 'address'}).compute()
-        Count_Transactions = Sender_Adress[['txid_x','address']].rename(columns = {'txid_x':'txid'}).append(Receiver_Adress[['txid', 'address']]).groupby(['address','txid']).count()\
-            .reset_index()['address'].value_counts(sort = False).reset_index().compute()
-    else:
-        Count_Sender_Transaction = tx_in.groupby(['address','txid_x']).count().reset_index()['address'].value_counts(sort = False).reset_index().compute()
-        Count_Receiver_Transaction = tx_out.groupby(['address','txid']).count().reset_index()['address'].value_counts(sort = False).reset_index().compute()
-        df_receiver_equal_sender = tx_in[['txid', 'address']].merge(tx_out[['txid', 'address']], on = 'txid', how = 'inner')
-        Count_Receiver_equal_Sender = df_receiver_equal_sender[df_receiver_equal_sender['address_x'] == df_receiver_equal_sender['address_y']].groupby(['txid_x', 'address_x']).count()\
-            .reset_index()['address_x'].value_counts().reset_index().rename(columns = {'address_x': 'address'}).compute()
-        Count_Transactions = tx_in[['txid', 'address']].append(tx_out[['txid', 'address']]).groupby(['address_x','txid_x']).count()\
-            .reset_index()['address_x'].value_counts(sort = False).reset_index().compute()
-    return Count_Transactions, Count_Sender_Transaction, Count_Receiver_Transaction, Count_Receiver_equal_Sender
+    filename_sender = f'final_count_sender_transactions_{partition_name}.json'
+    filename_receiver = f'final_count_receiver_transactions_{partition_name}.json'
+    filename_all = f'final_count_transactions_{partition_name}.json'
+    filename_equal = f'final_count_receiver_eqal_sender_transactions_{partition_name}.json'
+    
+    tx_in.groupby(['address', 'txid'])['value'].count().reset_index()\
+        .groupby('address')['txid'].count().reset_index()\
+            .rename(columns = {'txid': 'count_transactions_sender'}).to_json(filename_sender, orient = 'records') 
+        
+    tx_out.groupby(['address', 'txid'])['value'].count().reset_index()\
+        .groupby('address')['txid'].count().reset_index()\
+            .rename(columns = {'txid': 'count_transactions_receiver'}).to_json(filename_receiver, orient = 'records') 
+        
+    df = dd.concat([tx_in[['address', 'txid', 'value']], tx_out[['address', 'txid', 'value']]], axis = 0)
+    df.groupby(['address', 'txid'])['value'].count().reset_index()\
+        .groupby('address')['value'].count().reset_index()\
+            .rename(columns = {'value': 'count_transactions_all'}).to_json(filename_all, orient = 'records') 
+        
+    df_receiver_equal_sender = tx_in[['address', 'txid', 'value']].merge(tx_out[['address', 'txid', 'value']], on = 'txid', how = 'inner')
+    df_receiver_equal_sender['count_receiver_equal_sender_transactions'] = df_receiver_equal_sender['address_x'] == df_receiver_equal_sender['address_y']
+    df_receiver_equal_sender.groupby(['address_x', 'txid'])['count_receiver_equal_sender_transactions'].max().reset_index()\
+            .groupby('address_x')['count_receiver_equal_sender_transactions'].sum().reset_index().to_json(filename_equal, orient = 'records') 
 
-# Count_Transactions, Count_Sender_Transaction, Count_Receiver_Transaction, Count_Receiver_equal_Sender = count_transactions(tx_in, tx_out, transaction_reward)
-# Count_Transactions.to_csv(f'final_count_transactions_{partition_name}.csv', sep = ';')
-# Count_Sender_Transaction.to_csv(f'final_count_sender_transactions_{partition_name}.csv', sep = ';')
-# Count_Receiver_Transaction.to_csv(f'final_count_receiver_transactions_{partition_name}.csv', sep = ';')
-# Count_Receiver_equal_Sender.to_csv(f'final_count_receiver_eqal_sender_transactions_{partition_name}.csv', sep = ';')
-
-#print(str(timedelta(seconds=timeit.timeit(stmt='count_transactions()', globals=globals(), number=1))))
+#with ProgressBar(dt = 6):
+#    count_transactions(tx_in, tx_out, partition_name)
 
 def lifetime_address(tx_in, tx_out, partition_name):
     '''
-    This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 5h)
+    This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 10 min)
 
     Parameters
     ----------
@@ -240,21 +234,21 @@ def lifetime_address(tx_in, tx_out, partition_name):
     Returns
     -------
     CSV file with lifetime of an address
-    
-    '''
-    df = dd.concat([tx_in[['address', 'nTime']], tx_out[['address', 'nTime']]], axis = 0)
-    df = df.groupby('address')['nTime'].min().reset_index()\
-        .merge(df.groupby('address')['nTime'].max().reset_index(), on = 'address', how = 'inner')
-    
-    df['nTime_x'] = dd.to_datetime(df['nTime_x'])
-    df['nTime_y'] = dd.to_datetime(df['nTime_y'])
-    df['lifetime'] = (df['nTime_y'] - df['nTime_x']).dt.days
-    df = df[['address', 'lifetime']]
-    df['lifetime'] = df['lifetime'] + 1
-    df.to_csv(filename = f'final_lifetime_address_{partition_name}.csv', sep = ';', single_file = True, index=False) 
 
-#with ProgressBar():
-#    test = lifetime_address(tx_in, tx_out, partition_name)
+    '''
+    filename = f'final_lifetime_address_{partition_name}.json'
+
+    df = dd.concat([tx_in[['address', 'nTime']], tx_out[['address', 'nTime']]], axis = 0)
+    df_min = df.groupby('address')['nTime'].min().reset_index()
+    df_max = df.groupby('address')['nTime'].max().reset_index()
+    df = df_min.merge(df_max, on = 'address', how = 'inner')
+
+    df['lifetime'] = (df['nTime_y'] - df['nTime_x']).dt.days + 1
+    df = df[['address', 'lifetime']]
+    df.to_json(filename, orient = 'records')
+
+#with ProgressBar(dt = 6):
+#    lifetime_address(tx_in, tx_out, partition_name)
 
 # Check if df length is ok
 #check_df_length('final_lifetime_address_610682-615423', 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_lifetime_address_610682-615423.csv')
@@ -274,16 +268,15 @@ def helper_exchange_rate(tx_in, tx_out):
     tx_out : Receiver transactions with value in euro
 
     '''
-    tx_in['nTime'] = dd.to_datetime(tx_in['nTime']).dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
-    tx_out['nTime'] = dd.to_datetime(tx_out['nTime']).dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
-    tx_in['value'] = tx_in['value'] / 100000000 * tx_in['nTime']
-    tx_out['value'] = tx_out['value'] / 100000000 * tx_out['nTime']
+    tx_in['nTime'] = tx_in['nTime'].dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
+    tx_out['nTime'] = tx_out['nTime'].dt.strftime('%Y-%m-%d').map(btc_exchange_rate_2020)
+    tx_in['value'] = tx_in['value'] * tx_in['nTime']
+    tx_out['value'] = tx_out['value'] * tx_out['nTime']
     return tx_in, tx_out
-
 
 def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
     '''
-    This function calculates the sum of the transaction value in btc per address (Runtime: 10 Minuten)
+    This function calculates the sum of the transaction value in btc per address (Runtime: 12 Minuten + )
 
     Parameters
     ----------
@@ -297,23 +290,21 @@ def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
     CSV files with value of all transactions, sender transactions, receiver transactions
 
     '''
-    filename_all = f'final_sum_transaction_value_all_{partition_name}.csv'
-    filename_sender = f'final_sum_transaction_value_sender_{partition_name}.csv'
-    filename_receiver = f'final_sum_transaction_value_receiver_{partition_name}.csv'
+    filename_all = f'final_sum_transaction_value_all_{partition_name}.json'
+    filename_sender = f'final_sum_transaction_value_sender_{partition_name}.json'
+    filename_receiver = f'final_sum_transaction_value_receiver_{partition_name}.json'
     
     if euro:
         tx_in, tx_out = helper_exchange_rate(tx_in, tx_out)
-        filename_all = f'final_sum_transaction_value_all_euro_{partition_name}.csv'
-        filename_sender = f'final_sum_transaction_value_sender_euro_{partition_name}.csv'
-        filename_receiver = f'final_sum_transaction_value_receiver_euro_{partition_name}.csv'
+        filename_all = f'final_sum_transaction_value_all_euro_{partition_name}.json'
+        filename_sender = f'final_sum_transaction_value_sender_euro_{partition_name}.json'
+        filename_receiver = f'final_sum_transaction_value_receiver_euro_{partition_name}.json'
     
-    tx_in.groupby('address')['value'].sum().reset_index()\
-        .to_csv(filename = filename_sender, sep = ';', single_file = True, index=False) 
-    tx_out.groupby('address')['value'].sum().reset_index()\
-        .to_csv(filename = filename_receiver, sep = ';', single_file = True, index=False)
+    tx_in.groupby('address')['value'].sum().reset_index().to_json(filename_sender, orient = 'records')
+    tx_out.groupby('address')['value'].sum().reset_index().to_json(filename_receiver, orient = 'records')
+    
     df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
-    df.groupby('address')['value'].sum().reset_index()\
-        .to_csv(filename = filename_all, sep = ';', single_file = True, index=False)
+    df.groupby('address')['value'].sum().reset_index().to_json(filename_all, orient = 'records')
 
 #with ProgressBar():
 #    sum_transaction_value_btc(tx_in, tx_out, partition_name)
@@ -347,30 +338,28 @@ def max_min_transaction_value_btc(tx_in, tx_out, partition_name, max = True):
     CSV-files with maximum and minimum by all, sender or receiver transactions
 
     '''
-    filename_all = f'final_max_transaction_value_all_{partition_name}.csv'
-    filename_sender = f'final_max_transaction_value_sender_{partition_name}.csv'
-    filename_receiver = f'final_max_transaction_value_receiver_{partition_name}.csv'
+    filename_all = f'final_max_transaction_value_all_{partition_name}.json'
+    filename_sender = f'final_max_transaction_value_sender_{partition_name}.json'
+    filename_receiver = f'final_max_transaction_value_receiver_{partition_name}.json'
     
     if max:
-        tx_in.groupby('address')['value'].max().reset_index()\
-            .to_csv(filename = filename_sender, sep = ';', single_file = True, index=False) 
-        tx_out.groupby('address')['value'].max().reset_index()\
-            .to_csv(filename = filename_receiver, sep = ';', single_file = True, index=False) 
+        tx_in.groupby('address')['value'].max().reset_index().to_json(filename_sender, orient = 'records')
+        tx_out.groupby('address')['value'].max().reset_index().to_json(filename_receiver, orient = 'records') 
+        
         df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
-        df.groupby('address')['value'].max().reset_index()\
-            .to_csv(filename = filename_all, sep = ';', single_file = True, index=False)
+        df.groupby('address')['value'].max().reset_index().to_json(filename_all, orient = 'records')
+        
     else:
-        filename_all = f'final_min_transaction_value_all_{partition_name}.csv'
-        filename_sender = f'final_min_transaction_value_sender_{partition_name}.csv'
-        filename_receiver = f'final_min_transaction_value_receiver_{partition_name}.csv'
-        tx_in.groupby('address')['value'].min().reset_index()\
-            .to_csv(filename = filename_sender, sep = ';', single_file = True, index=False) 
-        tx_out.groupby('address')['value'].min().reset_index()\
-            .to_csv(filename = filename_receiver, sep = ';', single_file = True, index=False) 
+        filename_all = f'final_min_transaction_value_all_{partition_name}.json'
+        filename_sender = f'final_min_transaction_value_sender_{partition_name}.json'
+        filename_receiver = f'final_min_transaction_value_receiver_{partition_name}.json'
+        
+        tx_in.groupby('address')['value'].min().reset_index().to_json(filename_sender, orient = 'records')
+        tx_out.groupby('address')['value'].min().reset_index().to_json(filename_receiver, orient = 'records')
+            
         df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
-        df.groupby('address')['value'].min().reset_index()\
-            .to_csv(filename = filename_all, sep = ';', single_file = True, index=False)
-
+        df.groupby('address')['value'].min().reset_index().to_json(filename_all, orient = 'records')
+            
 #with ProgressBar():
 #    max_min_transaction_value_btc(tx_in, tx_out, partition_name)
 #    max_min_transaction_value_btc(tx_in, tx_out, partition_name, False)
@@ -400,7 +389,7 @@ def helper_transaction_fee(df, df_fee, filename):
     '''
     df.merge(df_fee, on = 'txid', how = 'left')\
         .groupby('address')['fee'].sum().reset_index()\
-            .to_csv(filename = filename, sep = ';', single_file = True, index=False)
+            .to_json(filename, orient = 'records')
 
 def transaction_fee(tx_in, tx_out, partition_name):
     '''
@@ -417,9 +406,9 @@ def transaction_fee(tx_in, tx_out, partition_name):
     CSV file with transaction fees
 
     '''
-    filename_all = f'final_transaction_fee_{partition_name}.csv'
-    filename_sender = f'final_transaction_fee_sender_{partition_name}.csv'
-    filename_receiver = f'final_transaction_fee_receiver_{partition_name}.csv'
+    filename_all = f'final_transaction_fee_{partition_name}.json'
+    filename_sender = f'final_transaction_fee_sender_{partition_name}.json'
+    filename_receiver = f'final_transaction_fee_receiver_{partition_name}.json'
     
     df_fee = tx_in.groupby('txid')['value'].sum().reset_index().merge(tx_out.groupby('txid')['value'].sum().reset_index(), on = 'txid', how = 'left')
     df_fee['fee'] = df_fee['value_x'] - df_fee['value_y']
@@ -454,7 +443,6 @@ def helper_time_transactions(df, filename):
 
     '''
     df = df[['address', 'nTime']]
-    df['nTime'] = dd.to_datetime(df['nTime'])
     df = df.dropna(subset=['address']).sort_values(['address', 'nTime']).reset_index(drop = True)
     # NOT WORKING
     df = dd.concat([df['address'], df.groupby('address')['nTime'].apply(lambda x: x.diff().dt.days, meta = ('diff', 'float64'))], axis = 1)
@@ -486,7 +474,6 @@ def time_transactions(tx_in, tx_out, partition_name):
     helper_time_transactions(tx_out, filename_receiver_std)
     # NOT READY
     df = dd.concat([tx_in[['txid', 'address', 'nTime']], tx_out[['txid', 'address', 'nTime']]], axis = 0)
-    
     helper_time_transactions(df, filename_all_std)
 
 def std_transaction_value(tx_in, tx_out, partition_name):
@@ -598,7 +585,7 @@ def count_addresses(tx_in, tx_out, partition_name):
 
 def balance(tx_in, tx_out, partition_name):
     '''
-    This function generates the balance after each transaction
+    This function generates the balance after each transaction (Runtime: 90 Minuten)
 
     Parameters
     ----------
@@ -608,14 +595,88 @@ def balance(tx_in, tx_out, partition_name):
 
     Returns
     -------
-    CSV-files with the mean and standard deviation of the balance
+    JSON-files with the mean and standard deviation of the balance
 
     '''
-    df = dd.concat([tx_in[['txid', 'address', 'value']], tx_out[['txid', 'address', 'value']]], axis = 0)
-    df = df.groupby(['address', 'txid']).sum().reset_index()
-    df_add = df.groupby('address')['value'].cumsum()
-    df = dd.concat([df, df_add], axis = 1)
-    return df.head(100)
+    '''
+    filename_std = f'final_std_balance_{partition_name}.json'
+    filename_mean = f'final_mean_balance_{partition_name}.json' 
+    '''
+    filename = f'final_balance_per_address_after_each_transaction_{partition_name}.json' 
     
+    tx_in['value'] = tx_in['value'] * (-1)
+    
+    df = dd.concat([tx_in[['txid', 'address', 'value', 'nTime']], tx_out[['txid', 'address', 'value', 'nTime']]], axis = 0)\
+        .groupby(['address', 'txid', 'nTime']).sum().reset_index().sort_values('nTime')
+    df_add = df.rename(columns = {'value': 'cumsum'}).groupby('address')['cumsum'].cumsum()
+    df = dd.concat([df, df_add], axis = 1)
+    df = df[['address', 'cumsum']]
+    df['cumsum'] = abs(df['cumsum'])
+    df.to_json(filename, orient = 'records')
+    
+    '''
+    df.groupby('address').mean().reset_index().rename(columns = {'cumsum': 'mean_balance'}).to_json(filename_mean, orient = 'records') 
+    df.groupby('address').std().reset_index().rename(columns = {'cumsum': 'std_balance'}).to_json(filename_std, orient = 'records')
+    '''
+    
+#with ProgressBar():
+#    balance(tx_in, tx_out, partition_name)
 
-   
+# Check if df length is ok
+#check_df_length(f'final_std_balance_{partition_name}.json')
+#check_df_length(f'final_mean_balance_{partition_name}.json')
+
+
+def count_addresses_per_transaction(tx_in, tx_out, partition_name):
+    '''
+    This function calculates the min, max, mean and standard deviation of the count of addresses per transactions (seperated by sender, receiver and all addresses) (Runtime: 12 x 85 Minuten)
+
+    Parameters
+    ----------
+    tx_in : Sender transactions
+    tx_out : Receiver transactions
+    partition_name : The height of the blocks for the investigated month
+
+    Returns
+    -------
+    JSON-files with the count of addresses sepearated by sender, receiver and all addresses
+
+    '''
+    '''
+    filename_sender_mean = f'final_mean_count_sender_addresses_per_transaction_{partition_name}.json'
+    filename_receiver_mean = f'final_mean_count_receiver_addresses_per_transaction_{partition_name}.json'
+    filename_all_mean = f'final_mean_count_addresses_per_transaction_{partition_name}.json'
+    filename_sender_min = f'final_min_count_sender_addresses_per_transaction_{partition_name}.json'
+    filename_receiver_min = f'final_min_count_receiver_addresses_per_transaction_{partition_name}.json'
+    filename_all_min = f'final_min_count_addresses_per_transaction_{partition_name}.json'
+    filename_sender_max = f'final_max_count_sender_addresses_per_transaction_{partition_name}.json'
+    filename_receiver_max = f'final_max_count_receiver_addresses_per_transaction_{partition_name}.json'
+    filename_all_max = f'final_max_count_addresses_per_transaction_{partition_name}.json'
+    filename_sender_std = f'final_std_count_sender_addresses_per_transaction_{partition_name}.json'
+    filename_receiver_std = f'final_std_count_receiver_addresses_per_transaction_{partition_name}.json'
+    filename_all_std = f'final_std_addresses_per_transaction_{partition_name}.json'
+    '''
+    filename = f'final_count_addresses_per_transaction_{partition_name}.json'
+    count_transactions = tx_in.groupby('txid')['nTime'].count().reset_index().merge(tx_out.groupby('txid')['nTime'].count().reset_index(), on = 'txid', how = 'outer').rename(columns = {'nTime_x': 'count_address_sender', 'nTime_y': 'count_address_receiver'})
+    count_transactions['count_address'] = count_transactions['count_address_sender'] + count_transactions['count_address_receiver']
+    count_transactions.to_json(filename, orient = 'records')
+    
+    '''
+    df = dd.concat([tx_in[['txid', 'address']], tx_out[['txid', 'address']]], axis = 0)
+    df = df.merge(count_transactions, on = 'txid', how = 'left')
+    df.groupby('address')['count_address_sender'].mean().reset_index().rename(columns = {'count_address_sender': 'count_address_sender_mean'}).to_json(filename_sender_mean, orient = 'records') 
+    df.groupby('address')['count_address_receiver'].mean().reset_index().rename(columns = {'count_address_receiver': 'count_address_receiver_mean'}).to_json(filename_receiver_mean, orient = 'records') 
+    df.groupby('address')['count_address'].mean().reset_index().rename(columns = {'count_address': 'count_address_mean'}).to_json(filename_all_mean, orient = 'records') 
+    
+    df.groupby('address')['count_address_sender'].min().reset_index().rename(columns = {'count_address_sender': 'count_address_sender_min'}).to_json(filename_sender_min, orient = 'records') 
+    df.groupby('address')['count_address_receiver'].min().reset_index().rename(columns = {'count_address_receiver': 'count_address_receiver_min'}).to_json(filename_receiver_min, orient = 'records') 
+    df.groupby('address')['count_address'].min().reset_index().rename(columns = {'count_address': 'count_address_min'}).to_json(filename_all_min, orient = 'records') 
+    
+    df.groupby('address')['count_address_sender'].max().reset_index().rename(columns = {'count_address_sender': 'count_address_sender_max'}).to_json(filename_sender_max, orient = 'records') 
+    df.groupby('address')['count_address_receiver'].max().reset_index().rename(columns = {'count_address_receiver': 'count_address_receiver_max'}).to_json(filename_receiver_max, orient = 'records') 
+    df.groupby('address')['count_address'].max().reset_index().rename(columns = {'count_address': 'count_address_max'}).to_json(filename_all_max, orient = 'records') 
+    
+    df.groupby('address')['count_address_sender'].std().reset_index().rename(columns = {'count_address_sender': 'count_address_sender_std'}).to_json(filename_sender_std, orient = 'records') 
+    df.groupby('address')['count_address_receiver'].std().reset_index().rename(columns = {'count_address_receiver': 'count_address_receiver_std'}).to_json(filename_receiver_std, orient = 'records') 
+    df.groupby('address')['count_address'].std().reset_index().rename(columns = {'count_address': 'count_address_std'}).to_json(filename_all_std, orient = 'records') 
+    '''
