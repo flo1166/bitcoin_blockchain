@@ -1,14 +1,14 @@
 import dask.dataframe as dd
-import numpy as np
 import os
 import pandas as pd
-import time
 import re
 from datetime import datetime
-import timeit
 from dask.diagnostics import ProgressBar
 import itertools
 import glob
+path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/githubrepo/'
+os.chdir(path)
+from notifier import notify_telegram_bot
 
 # Read paths and list files
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
@@ -71,12 +71,14 @@ def filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, i, n
     if not new_files:
         tx_in = dd.read_csv(files_tx_in[i], sep = ';', names = tx_in_col, usecols = tx_in_col[:3], assume_missing=True)
         tx_out = dd.read_csv(files_tx_out[i], sep = ';', names = tx_ou_col, usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], assume_missing=True)
+        tx_out_prev = dd.read_csv(files_tx_out[i-1], sep = ';', names = tx_ou_col, usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], assume_missing=True)
     else:
         tx_in = dd.read_json(glob.glob(f'new/tx_in-{partition_name}_new.json/*.part'), orient = 'records', convert_dates = ['nTime'])
         tx_out = dd.read_json(glob.glob(f'new/tx_out-{partition_name}_new.json/*.part'), orient = 'records', convert_dates = ['nTime'])
-    return blocks, transactions, tx_in, tx_out
+        tx_out_prev = None
+    return blocks, transactions, tx_in, tx_out, tx_out_prev
 
-#blocks, transactions, tx_in, tx_out = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 0)
+#blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 1)
 
 #transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute()
 
@@ -103,7 +105,7 @@ def check_df_length(filename, directory = None):
         print(df.isnull().sum().compute())
         print(df.head())
 
-def build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, filename):
+def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_reward, filename):
     '''
     This builds the tx_in file with all informations needed (Runtime: 10 Minuten)
 
@@ -111,6 +113,7 @@ def build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, filena
     ----------
     tx_in : The sender transactions
     tx_out : The receiver transactions
+    tx_out_prev : The previous receiver transactions (needed because of data structure (reference to previous transaction that could be outside of the current month))
     transactions : The transactions as links to blocks
     blocks : The blocks
     transactions_reward : The reward transactions to ignore in the new build df
@@ -122,9 +125,10 @@ def build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, filena
 
     '''
     current_save_directory = f'new/tx_in-{filename}.json'
+    tx_out_combined = dd.concat([tx_out, tx_out_prev], axis = 0)
     
     current_df = tx_in[~tx_in['txid'].isin(transactions_reward)]\
-        .merge(tx_out, left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left')[['txid_x','indexOut', 'value', 'address']]\
+        .merge(tx_out_combined, left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left')[['txid_x','indexOut', 'value', 'address']]\
             .rename(columns = {'txid_x': 'txid'})\
                 .merge(transactions, on = 'txid', how = 'left')\
                     .merge(blocks, left_on = 'hashBlock', right_on = 'block_hash', how = 'left')[['txid','indexOut', 'value', 'address', 'nTime']]
@@ -179,7 +183,20 @@ def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
 # Um Adresse von tx_in zu erhalten, muss tx_out verbunden werden, da in tx_in nur Informationen zu der vorhergehenden Transaktion und index ist:
 # tx_in[~tx_in['txid'].isin(transactions_reward)].merge(tx_out, left_on = ['hash_prev_out', 'index_prev_out'], right_on = ['txid', 'indexOut'])
 
-blocks, transactions, tx_in, tx_out = filereader(files_blocks, files_transactions, None, None, 0, True)
+def progress_and_notification(df, function):
+    time = datetime.now().strftime("%H:%M:%S")
+    notify_telegram_bot(f'Starting script at {time}.')
+    try:
+        with ProgressBar(dt = 6):
+            temp = function(df)
+    except:
+        time = datetime.now().strftime("%H:%M:%S")
+        notify_telegram_bot(f'Error with current script at {time}!')
+    time = datetime.now().strftime("%H:%M:%S")
+    notify_telegram_bot(f'Finished script at {time}.')
+    return temp
+        
+blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, None, None, 1, True)
 
 def count_transactions(tx_in, tx_out, partition_name):
     '''
@@ -439,18 +456,12 @@ def helper_time_transactions(df, filename):
 
     Returns
     -------
-    CSV file with time differences per transactions described through standard deviation
-
+    JSON file with time differences per transactions described through standard deviation
     '''
-    df = df[['address', 'nTime']]
-    df = df.dropna(subset=['address']).sort_values(['address', 'nTime']).reset_index(drop = True)
-    # NOT WORKING
-    df = dd.concat([df['address'], df.groupby('address')['nTime'].apply(lambda x: x.diff().dt.days, meta = ('diff', 'float64'))], axis = 1)
-    df = df.groupby('address')['diff'].std()
-    return df
-    "Concatenated DataFrames of different lengths"
-    #return df.groupby('address')['diff'].std().head()#.reset_index().to_csv(filename = filename, sep = ';', single_file = True, index=False)
-
+    df = df[['address', 'nTime']].groupby('address').apply(lambda x: x.sort_values(by = ['address', 'nTime']), meta = {'address': 'object', 'nTime': 'datetime64[ns]'})
+    df['diff'] = df.groupby('address')['nTime'].apply(lambda x: x.diff().dt.round(freq = 'D').dt.days, meta = ('nTime', 'int64'))
+    df[['address', 'diff']].to_json(filename, orient = 'records')
+    
 def time_transactions(tx_in, tx_out, partition_name):
     '''
     This function calculates the difference in time per transaction per address and the standard deviation of it
@@ -463,18 +474,18 @@ def time_transactions(tx_in, tx_out, partition_name):
 
     Returns
     -------
-    CSV file with time differences per transactions described through standard deviation
+    JSON files with time differences per transactions
 
     '''
-    filename_all_std = f'final_transaction_time_std_{partition_name}.csv'
-    filename_sender_std = f'final_transaction_time_std_sender_{partition_name}.csv'
-    filename_receiver_std = f'final_transaction_time_std_receiver_{partition_name}.csv'
-    # NOT READY
-    helper_time_transactions(tx_in, filename_sender_std)
-    helper_time_transactions(tx_out, filename_receiver_std)
-    # NOT READY
+    filename_all = f'final_transaction_time_diff_{partition_name}.json'
+    filename_sender = f'final_transaction_time_diff_sender_{partition_name}.json'
+    filename_receiver = f'final_transaction_time_diff_receiver_{partition_name}.json'
+    
+    helper_time_transactions(tx_in, filename_sender)
+    helper_time_transactions(tx_out, filename_receiver)
+
     df = dd.concat([tx_in[['txid', 'address', 'nTime']], tx_out[['txid', 'address', 'nTime']]], axis = 0)
-    helper_time_transactions(df, filename_all_std)
+    helper_time_transactions(df, filename_all)
 
 def std_transaction_value(tx_in, tx_out, partition_name):
     '''
