@@ -9,6 +9,7 @@ import glob
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/githubrepo/'
 os.chdir(path)
 from notifier import notify_telegram_bot
+import pyarrow as pa
 
 # Read paths and list files
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
@@ -82,28 +83,36 @@ def filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, i, n
 
 #transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute()
 
-def file_writer(df, filename, csv = False, json = False):
+def file_writer(df, filename, schema = None, csv = False, json = False, feature = True):
     '''
     This function saves a file as parquet, csv or json
 
     Parameters
     ----------
-    df : TYPE
-        DESCRIPTION.
-    filename : TYPE
-        DESCRIPTION.
-
+    df : Dataframe to process
+    filename : Filename for output
+    schema : is a parquet schema for pyarrow engine
+    csv : boolean if true writes a csv file
+    json : boolean if true writes a json file (if csv is also true, than only a csv file is saved)
+    feature : boolean if true saves at files directory of features
+    
     Returns
     -------
-    None.
+    Saves files as csv, json or parquet
 
     '''
+    text = ''
+    if feature:
+        text = 'features/'
+    
+    filename = f'{text}{filename}'
+    
     if csv:
         df.to_csv(filename = filename, sep = ';', single_file = True, index=False) 
     elif json:
         df.to_json(filename, orient = 'records') 
     else:
-        df.to_parquet(filename)
+        df.to_parquet(filename, engine = 'pyarrow', schema = schema)
 
 def check_df_length(filename, directory = None):
     '''
@@ -161,7 +170,7 @@ def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_r
     current_df['nTime'] = current_df['nTime'].apply(lambda x: unix_in_datetime(x), meta=('nTime_datetime', 'datetime64[ns]'))
     current_df['value'] = abs(current_df['value']) / 100000000
     
-    file_writer(current_df, current_save_directory)
+    file_writer(current_df, current_save_directory, feature = False)
 
 #with ProgressBar():
 #    build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, '610682-615423_new')
@@ -196,7 +205,7 @@ def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
     current_df['nTime'] = current_df['nTime'].apply(lambda x: unix_in_datetime(x), meta=('nTime_datetime', 'datetime64[ns]'))
     current_df['value'] = abs(current_df['value']) / 100000000
     
-    file_writer(current_df, current_save_directory)
+    file_writer(current_df, current_save_directory, feature = False)
 
 #with ProgressBar():
 #    build_tx_out(tx_out, transactions, blocks, transactions_reward, '610682-615423_new')
@@ -607,6 +616,25 @@ def std_transaction_value(tx_in, tx_out, partition_name):
  #check_df_length(f'final_std_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_std_transaction_value_sender_{partition_name}.csv)
  #check_df_length(f'final_std_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_std_transaction_value_receiver_{partition_name}.csv'.csv)
 
+def adresses_per_txid(df):
+    '''
+    This function saves a file with txid and a list of addresses
+
+    Parameters
+    ----------
+    df : Dataframe to process
+
+    Returns
+    -------
+    File with txid's and lists of addresses
+
+    '''
+    schema = pa.schema([('index', pa.string()), ('address', pa.list_(pa.string()))])
+    df = df.groupby('txid')['address'].apply(list, meta = ('address', 'object'))
+    df = df.reset_index()
+    file_writer(df, 'temp_adresses_per_txid', schema = schema, feature = False)
+    return dd.read_parquet('temp_adresses_per_txid')
+
 def helper_count_addresses(df, filename):
     '''
     This function helps the count_addresses function to determine the count of unique addresses per address in dataframe
@@ -622,16 +650,17 @@ def helper_count_addresses(df, filename):
     Files with the count of unique addresses per address (excluded the own address)
 
     '''
-    txid_to_address = df.groupby('txid')['address'].apply(list, meta = ('address', 'object'))
-    txid_to_address = txid_to_address.compute().T.to_dict()
+    schema = pa.schema([('index', pa.string()), ('count_unique_addresses', pa.int64())])
+    
+    adresses_per_txid = adresses_per_txid(df)
     
     df = df[['address', 'txid']]
-    df['txid'] = df['txid'].map(txid_to_address)
+    df['txid'] = df['txid'].merge(adresses_per_txid, on = 'txid', how = 'left')
     df = df.groupby('address')['txid'].apply(list, meta = ('count_unique_addresses', 'object'))
     df = df.apply(lambda x: len(set(list(itertools.chain(*x)))) - 1, meta=('count_unique_addresses', 'object'))
     df = df.reset_index()
     
-    file_writer(df, filename)
+    file_writer(df, filename, schema)
 
 def count_addresses(tx_in, tx_out, partition_name):
     '''
