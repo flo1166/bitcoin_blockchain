@@ -213,11 +213,6 @@ def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
 # Check if df length is ok
 #check_df_length('tx_out-610682-615423_new')
 
-# Transaktion without transaction reward: transactions[~transactions['txid'].isin(transactions_reward)]
-# Transaktion without transaction reward: tx_in[~tx_in['txid'].isin(transactions_reward)]
-# Um Adresse von tx_in zu erhalten, muss tx_out verbunden werden, da in tx_in nur Informationen zu der vorhergehenden Transaktion und index ist:
-# tx_in[~tx_in['txid'].isin(transactions_reward)].merge(tx_out, left_on = ['hash_prev_out', 'index_prev_out'], right_on = ['txid', 'indexOut'])
-
 def progress_and_notification(df, function):
     time = datetime.now().strftime("%H:%M:%S")
     notify_telegram_bot(f'Starting script at {time}.')
@@ -288,9 +283,6 @@ def count_transactions(tx_in, tx_out, partition_name):
     df_receiver_equal_sender = df_receiver_equal_sender.reset_index()
     file_writer(df_receiver_equal_sender, filename_equal)
 
-#with ProgressBar(dt = 6):
-#    count_transactions(tx_in, tx_out, partition_name)
-
 def lifetime_address(tx_in, tx_out, partition_name):
     '''
     This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 10 min)
@@ -317,12 +309,6 @@ def lifetime_address(tx_in, tx_out, partition_name):
     df['lifetime'] = (df['nTime_y'] - df['nTime_x']).dt.days + 1
     df = df[['address', 'lifetime']]
     file_writer(df, filename)
-
-#with ProgressBar(dt = 6):
-#    lifetime_address(tx_in, tx_out, partition_name)
-
-# Check if df length is ok
-#check_df_length('final_lifetime_address_610682-615423', 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_lifetime_address_610682-615423.csv')
 
 def helper_exchange_rate(tx_in, tx_out):
     '''
@@ -396,22 +382,6 @@ def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
     df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
     helper_sum_transaction_value(df, filename_all)
 
-#with ProgressBar():
-#    sum_transaction_value_btc(tx_in, tx_out, partition_name)
-
-# Check if df length is ok
-#check_df_length(f'final_sum_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_sender_{partition_name}.csv')
-#check_df_length(f'final_sum_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_receiver_{partition_name}.csv')
-#check_df_length(f'final_sum_transaction_value_all_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_all_{partition_name}.csv')
-
-#with ProgressBar():
-#    sum_transaction_value_btc(tx_in, tx_out, partition_name, True)
-
-# Check if df length is ok
-#check_df_length(f'final_sum_transaction_value_sender_euro_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_sender_euro_{partition_name}.csv')
-#check_df_length(f'final_sum_transaction_value_receiver_euro_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_receiver_euro_{partition_name}.csv')
-#check_df_length(f'final_sum_transaction_value_all_euro_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_sum_transaction_value_all_euro_{partition_name}.csv')
-
 def helper_max_min(df, filename, max_boolean):
     '''
     This function helps the max_min_transaction_value_btc function to determine max / min and save it
@@ -463,18 +433,6 @@ def max_min_transaction_value_btc(tx_in, tx_out, partition_name, max_boolean = T
     helper_max_min(tx_out, filename_receiver, max_boolean)
     df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
     helper_max_min(df, filename_all, max_boolean)
-    
-#with ProgressBar():
-#    max_min_transaction_value_btc(tx_in, tx_out, partition_name)
-#    max_min_transaction_value_btc(tx_in, tx_out, partition_name, False)
-
-# Check if df length is ok
-#check_df_length(f'final_max_transaction_value_all_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_max_transaction_value_all_{partition_name}.csv')
-#check_df_length(f'final_max_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_max_transaction_value_receiver_{partition_name}.csv')
-#check_df_length(f'final_max_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_max_transaction_value_sender_{partition_name}.csv')
-#check_df_length(f'final_min_transaction_value_all_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_min_transaction_value_all_{partition_name}.csv')
-#check_df_length(f'final_min_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_min_transaction_value_receiver_{partition_name}.csv')
-#check_df_length(f'final_min_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_min_transaction_value_sender_{partition_name}.csv')
 
 def helper_transaction_fee(df, df_fee, filename):
     '''
@@ -525,14 +483,6 @@ def transaction_fee(tx_in, tx_out, partition_name):
     df = dd.concat([tx_in[['txid', 'address', 'value']], tx_out[['txid', 'address', 'value']]], axis = 0)
     helper_transaction_fee(df, df_fee, filename_all)
     
- #with ProgressBar():
- #    transaction_fee(tx_in, tx_out, partition_name)
-
- # Check if df length is ok
- #check_df_length(f'final_transaction_fee_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_transaction_fee_{partition_name}.csv)
- #check_df_length(f'final_transaction_fee_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_transaction_fee_sender_{partition_name}.csv)
- #check_df_length(f'final_transaction_fee_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_transaction_fee_receiver_{partition_name}.csv)
-
 def helper_time_transactions(df, filename):
     '''
     This function helps the time_transactions function to calculate the difference in time and output the standard deviation of it
@@ -546,14 +496,15 @@ def helper_time_transactions(df, filename):
     -------
     File with time differences per transactions described through standard deviation
     '''
+    schema = pa.schema([('address', pa.string()), ('diff', pa.int64())])
     df = df[['address', 'nTime']].groupby('address').apply(lambda x: x.sort_values(by = ['address', 'nTime']), meta = {'address': 'object', 'nTime': 'datetime64[ns]'})
     df['diff'] = df.groupby('address')['nTime'].apply(lambda x: x.diff().dt.round(freq = 'D').dt.days, meta = ('nTime', 'int64'))
     df = df[['address', 'diff']]
-    file_writer(df, filename)
+    file_writer(df, filename, schema = schema)
     
 def time_transactions(tx_in, tx_out, partition_name):
     '''
-    This function calculates the difference in time per transaction per address and the standard deviation of it
+    This function calculates the difference in time per transaction per address (Runtime: )
 
     Parameters
     ----------
@@ -563,7 +514,7 @@ def time_transactions(tx_in, tx_out, partition_name):
 
     Returns
     -------
-    Files with time differences per transactions
+    Files with time differences per sender, receiver and all transactions 
 
     '''
     filename_all = f'final_transaction_time_diff_{partition_name}'
@@ -576,8 +527,9 @@ def time_transactions(tx_in, tx_out, partition_name):
     df = dd.concat([tx_in[['txid', 'address', 'nTime']], tx_out[['txid', 'address', 'nTime']]], axis = 0)
     helper_time_transactions(df, filename_all)
 
+'''
 def std_transaction_value(tx_in, tx_out, partition_name):
-    '''
+    
     This fuction calculates the standard deviation from the transaction value, regarding the sender, the receiver and all transactions
 
     Parameters
@@ -590,7 +542,7 @@ def std_transaction_value(tx_in, tx_out, partition_name):
     -------
     Files with the standard deviation of the transaction value from sender, receiver and all transactions
 
-    '''
+    
     filename_all = f'final_std_transaction_value_all_{partition_name}'
     filename_sender = f'final_std_transaction_value_sender_{partition_name}'
     filename_receiver = f'final_std_transaction_value_receiver_{partition_name}'
@@ -607,18 +559,11 @@ def std_transaction_value(tx_in, tx_out, partition_name):
     df = df.groupby('address')['value'].std()
     df = df.reset_index()
     file_writer(df, filename_all)
-        
- #with ProgressBar():
- #    std_transaction_value(tx_in, tx_out, partition_name)
+'''
 
- # Check if df length is ok
- #check_df_length(f'final_std_transaction_value_all_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_std_transaction_value_all_{partition_name}.csv)
- #check_df_length(f'final_std_transaction_value_sender_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_std_transaction_value_sender_{partition_name}.csv)
- #check_df_length(f'final_std_transaction_value_receiver_{partition_name}.csv', f'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/final_std_transaction_value_receiver_{partition_name}.csv'.csv)
-
-def adresses_per_txid(df):
+def addresses_per_txid(df):
     '''
-    This function saves a file with txid and a list of addresses
+    This function saves a file with txid and a list of addresses (Runtime: 10 Min)
 
     Parameters
     ----------
@@ -637,7 +582,7 @@ def adresses_per_txid(df):
 
 def helper_count_addresses(df, filename):
     '''
-    This function helps the count_addresses function to determine the count of unique addresses per address in dataframe
+    This function helps the count_addresses function to determine the count of unique addresses per address in dataframe (Runtime: 30 Minuten)
 
     Parameters
     ----------
@@ -652,11 +597,11 @@ def helper_count_addresses(df, filename):
     '''
     schema = pa.schema([('index', pa.string()), ('count_unique_addresses', pa.int64())])
     
-    adresses_per_txid = adresses_per_txid(df)
+    address_per_txid = addresses_per_txid(df)
     
     df = df[['address', 'txid']]
-    df['txid'] = df['txid'].merge(adresses_per_txid, on = 'txid', how = 'left')
-    df = df.groupby('address')['txid'].apply(list, meta = ('count_unique_addresses', 'object'))
+    df = df.merge(address_per_txid, left_on = 'txid', right_on = 'index', how = 'left')
+    df = df.groupby('address_x')['address_y'].apply(list, meta = ('count_unique_addresses', 'object'))
     df = df.apply(lambda x: len(set(list(itertools.chain(*x)))) - 1, meta=('count_unique_addresses', 'object'))
     df = df.reset_index()
     
@@ -664,7 +609,7 @@ def helper_count_addresses(df, filename):
 
 def count_addresses(tx_in, tx_out, partition_name):
     '''
-    This fuction counts the unique addresses seperated by sender, receiver and all transactions
+    This fuction counts the unique addresses seperated by sender, receiver and all transactions (Runtime: 170 Minuten)
 
     Parameters
     ----------
@@ -720,14 +665,6 @@ def balance(tx_in, tx_out, partition_name):
     df['cumsum'] = abs(df['cumsum'])
     file_writer(df, filename)
     
-#with ProgressBar():
-#    balance(tx_in, tx_out, partition_name)
-
-# Check if df length is ok
-#check_df_length(f'final_std_balance_{partition_name}.json')
-#check_df_length(f'final_mean_balance_{partition_name}.json')
-
-
 def count_addresses_per_transaction(tx_in, tx_out, partition_name):
     '''
     ÜBERARBEITEN...
