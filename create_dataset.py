@@ -34,6 +34,9 @@ btc_exchange_rate_2020 = pd.read_csv('btc_eur_wechselkurs.csv', sep = ';' , thou
 btc_exchange_rate_2020 = btc_exchange_rate_2020.set_index(pd.to_datetime(pd.read_csv('btc_eur_wechselkurs.csv', sep = ';', usecols = ['Datum'])['Datum'], dayfirst = True).dt.strftime('%Y-%m-%d'))
 btc_exchange_rate_2020 = btc_exchange_rate_2020['Schlusskurs'].to_dict()
 
+# DarkNet Markets
+darknet_markets = pd.read_csv('DarkNetMarkets.csv', sep = ';', parse_dates = ['Datum'])
+
 def unix_in_datetime(unixtime):
     '''
     This funciton converts a unix timestamp (in blocks) into datetime
@@ -112,7 +115,10 @@ def file_writer(df, filename, schema = None, csv = False, json = False, feature 
     elif json:
         df.to_json(filename, orient = 'records') 
     else:
-        df.to_parquet(filename, engine = 'pyarrow', schema = schema)
+        if schema == None:
+            df.to_parquet(filename, engine = 'pyarrow')
+        else: 
+            df.to_parquet(filename, engine = 'pyarrow', schema = schema)
 
 def check_df_length(filename, directory = None):
     '''
@@ -219,9 +225,10 @@ def progress_and_notification(df, function):
     try:
         with ProgressBar(dt = 6):
             temp = function(df)
-    except:
+    except Exception as error:
         time = datetime.now().strftime("%H:%M:%S")
-        notify_telegram_bot(f'Error with current script at {time}!')
+        print(error)
+        notify_telegram_bot(f'Error with current script at {time}! Error message: {error}')
     time = datetime.now().strftime("%H:%M:%S")
     notify_telegram_bot(f'Finished script at {time}.')
     return temp
@@ -251,7 +258,7 @@ def helper_count_transactions(df, filename):
 
 def count_transactions(tx_in, tx_out, partition_name):
     '''
-    This Function counts transactions per bitcoin address (Runtime: 60 Min).
+    This Function counts transactions per bitcoin address (Runtime: 40 Min).
 
     Parameters
     ----------
@@ -283,6 +290,28 @@ def count_transactions(tx_in, tx_out, partition_name):
     df_receiver_equal_sender = df_receiver_equal_sender.reset_index()
     file_writer(df_receiver_equal_sender, filename_equal)
 
+def helper_lifetime_address(tx_in, tx_out):
+    '''
+    This function calculates the min and max date of an address
+
+    Parameters
+    ----------
+    tx_in : Sender transactions
+    tx_out : Receiver transactions
+
+    Returns
+    -------
+    df : with min and max date
+
+    '''
+    df = dd.concat([tx_in[['address', 'nTime']], tx_out[['address', 'nTime']]], axis = 0)
+    df_min = df.groupby('address')['nTime'].min()
+    df_min = df_min.reset_index()
+    df_max = df.groupby('address')['nTime'].max()
+    df_max = df_max.reset_index()
+    df = df_min.merge(df_max, on = 'address', how = 'inner')
+    return df
+
 def lifetime_address(tx_in, tx_out, partition_name):
     '''
     This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 10 min)
@@ -299,12 +328,7 @@ def lifetime_address(tx_in, tx_out, partition_name):
     '''
     filename = f'final_lifetime_address_{partition_name}'
 
-    df = dd.concat([tx_in[['address', 'nTime']], tx_out[['address', 'nTime']]], axis = 0)
-    df_min = df.groupby('address')['nTime'].min()
-    df_min = df_min.reset_index()
-    df_max = df.groupby('address')['nTime'].max()
-    df_max = df_max.reset_index()
-    df = df_min.merge(df_max, on = 'address', how = 'inner')
+    df = helper_lifetime_address(tx_in, tx_out)
 
     df['lifetime'] = (df['nTime_y'] - df['nTime_x']).dt.days + 1
     df = df[['address', 'lifetime']]
@@ -333,7 +357,7 @@ def helper_exchange_rate(tx_in, tx_out):
     tx_out['value'] = tx_out['value'] * tx_out['nTime']
     return tx_in, tx_out
 
-def helper_sum_transaction_value(df, filename):
+def helper_sum_transaction_value(df, filename, euro):
     '''
     This function helps the sum_transaction_value_btc function to determine the sum of each address and saves it as file.
 
@@ -349,11 +373,15 @@ def helper_sum_transaction_value(df, filename):
     '''
     df = df.groupby('address')['value'].sum()
     df = df.reset_index()
+    if euro:
+        df = df.rename(columns = {'value': 'sum_trans_value_euro'})
+    else:
+        df = df.rename(columns = {'value': 'sum_trans_value_btc'})
     file_writer(df, filename)
 
 def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
     '''
-    This function calculates the sum of the transaction value in btc per address (Runtime: 12 Minuten + )
+    This function calculates the sum of the transaction value in btc per address (Runtime: 13 Minuten)
 
     Parameters
     ----------
@@ -376,11 +404,11 @@ def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
     filename_sender = f'final_sum_transaction_value_sender{text}_{partition_name}'
     filename_receiver = f'final_sum_transaction_value_receiver{text}_{partition_name}'
     
-    helper_sum_transaction_value(tx_in, filename_sender)
-    helper_sum_transaction_value(tx_out, filename_receiver)
+    helper_sum_transaction_value(tx_in, filename_sender, euro)
+    helper_sum_transaction_value(tx_out, filename_receiver, euro)
     
     df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
-    helper_sum_transaction_value(df, filename_all)
+    helper_sum_transaction_value(df, filename_all, euro)
 
 def helper_max_min(df, filename, max_boolean):
     '''
@@ -456,7 +484,7 @@ def helper_transaction_fee(df, df_fee, filename):
 
 def transaction_fee(tx_in, tx_out, partition_name):
     '''
-    This function calculates the transaction fees (Runtime: 54 Minuten)
+    This function calculates the transaction fees (Runtime: 168 Minuten)
 
     Parameters
     ----------
@@ -496,12 +524,16 @@ def helper_time_transactions(df, filename):
     -------
     File with time differences per transactions described through standard deviation
     '''
-    schema = pa.schema([('address', pa.string()), ('diff', pa.int64())])
-    df = df[['address', 'nTime']].groupby('address').apply(lambda x: x.sort_values(by = ['address', 'nTime']), meta = {'address': 'object', 'nTime': 'datetime64[ns]'})
-    df['diff'] = df.groupby('address')['nTime'].apply(lambda x: x.diff().dt.round(freq = 'D').dt.days, meta = ('nTime', 'int64'))
-    df = df[['address', 'diff']]
-    file_writer(df, filename, schema = schema)
-    
+    #schema = pa.schema([('address', pa.string()), ('level_1', pa.int64()), ('diff', pa.duration('s'))])
+    df = df[['address', 'nTime', 'value']]
+    df = df.set_index('nTime')
+    df = df.groupby('address')['value'].apply(lambda x: x.sort_index(), meta = ('value', 'float64'))
+    df = df.reset_index()
+    df = df[['address', 'nTime']]
+    df = df.groupby('address')['nTime'].apply(lambda x: x.diff(), meta = ('diff', 'timedelta64[ns]'))
+    df = df.reset_index()
+    #file_writer(df, filename, schema = schema)
+
 def time_transactions(tx_in, tx_out, partition_name):
     '''
     This function calculates the difference in time per transaction per address (Runtime: )
@@ -633,7 +665,7 @@ def count_addresses(tx_in, tx_out, partition_name):
 
 def balance(tx_in, tx_out, partition_name):
     '''
-    This function generates the balance after each transaction (Runtime: 90 Minuten)
+    This function generates the balance after each transaction (Runtime: 14 Minuten)
 
     Parameters
     ----------
@@ -658,17 +690,17 @@ def balance(tx_in, tx_out, partition_name):
     df = df.groupby(['address', 'txid', 'nTime']).sum()
     df = df.reset_index()
     df = df.sort_values('nTime')
-    df_add = df.rename(columns = {'value': 'cumsum'})
-    df_add = df_add.groupby('address')['cumsum'].cumsum()
+    df_add = df.rename(columns = {'value': 'balance'})
+    df_add = df_add.groupby('address')['balance'].cumsum()
     df = dd.concat([df, df_add], axis = 1)
-    df = df[['address', 'cumsum']]
-    df['cumsum'] = abs(df['cumsum'])
+    df = df[['address', 'balance']]
+    df['balance'] = abs(df['balance'])
     file_writer(df, filename)
     
 def count_addresses_per_transaction(tx_in, tx_out, partition_name):
     '''
     ÜBERARBEITEN...
-    This function calculates the min, max, mean and standard deviation of the count of addresses per transactions (seperated by sender, receiver and all addresses) (Runtime: 12 x 85 Minuten)
+    This function calculates the min, max, mean and standard deviation of the count of addresses per transactions (seperated by sender, receiver and all addresses) (Runtime: 3 Minuten)
 
     Parameters
     ----------
@@ -724,3 +756,10 @@ def count_addresses_per_transaction(tx_in, tx_out, partition_name):
     df.groupby('address')['count_address_receiver'].std().reset_index().rename(columns = {'count_address_receiver': 'count_address_receiver_std'}).to_json(filename_receiver_std, orient = 'records') 
     df.groupby('address')['count_address'].std().reset_index().rename(columns = {'count_address': 'count_address_std'}).to_json(filename_all_std, orient = 'records') 
     '''
+
+def active_darknet_markets(tx_in, tx_out, partition_name):
+    df = helper_lifetime_address(tx_in, tx_out)
+    df['count_darknet'] = df.groupby('address').apply(lambda x: darknet_markets[(x['nTime_x'] =< darknet_markets['Datum']) and (darknet_markets['Datum'] <= x['nTime_y'])].mean(), meta = ('count_darknet_markets', 'float64'))
+    
+    df.groupby('address').apply(lambda x: darknet_markets[((darknet_markets['Datum'] >= x['nTime_x']) & (darknet_markets['Datum'] <= x['nTime_y']))]['Anzahl'].mean(), meta = ('count_darknet_markets', 'object'))
+    return df.head()                                                           
