@@ -27,7 +27,7 @@ tx_in_col = ['txid','hashPrevOut','indexPrevOut','scriptSig','sequence']
 tx_ou_col = ['txid','indexOut','value','scriptPubKey','address']
 
 # naming for saving csv file
-partition_name = '610682-615423'
+partition_name = '610682-663904'
 
 # btc exchange rates for 2020
 btc_exchange_rate_2020 = pd.read_csv('btc_eur_wechselkurs.csv', sep = ';' , thousands='.', decimal=',', usecols = ['Schlusskurs'])
@@ -36,21 +36,6 @@ btc_exchange_rate_2020 = btc_exchange_rate_2020['Schlusskurs'].to_dict()
 
 # DarkNet Markets
 darknet_markets = pd.read_csv('DarkNetMarkets.csv', sep = ';', parse_dates = ['Datum'])
-
-def unix_in_datetime(unixtime):
-    '''
-    This funciton converts a unix timestamp (in blocks) into datetime
-
-    Parameters
-    ----------
-    unixtime : a unixtime timestamp
-
-    Returns
-    -------
-    The datetime timestamp
-
-    '''
-    return datetime.fromtimestamp(unixtime).strftime('%Y-%m-%d %H:%M:%S')
 
 def filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, i, new_files = False):
     '''
@@ -70,21 +55,24 @@ def filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, i, n
     tx_out : dask DataFrame with tx_out
 
     '''
-    blocks = dd.read_csv(files_blocks[i], sep = ';', names = block_col, usecols = ['block_hash', 'hashPrev', 'height', 'nTime'], assume_missing=True)
-    transactions = dd.read_csv(files_transactions[i], sep = ';', names = trans_col, usecols = trans_col[:2], assume_missing=True)
     if not new_files:
+        blocks = dd.read_csv(files_blocks[i], sep = ';', names = block_col, usecols = ['block_hash', 'hashPrev', 'height', 'nTime'], assume_missing=True)
+        transactions = dd.read_csv(files_transactions[i], sep = ';', names = trans_col, usecols = trans_col[:2], assume_missing=True)
         tx_in = dd.read_csv(files_tx_in[i], sep = ';', names = tx_in_col, usecols = tx_in_col[:3], assume_missing=True)
         tx_out = dd.read_csv(files_tx_out[i], sep = ';', names = tx_ou_col, usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], assume_missing=True)
         tx_out_prev = dd.read_csv(files_tx_out[i-1], sep = ';', names = tx_ou_col, usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], assume_missing=True)
     else:
-        tx_in = dd.read_parquet(f'new/tx_in-{partition_name}/')
-        tx_out = dd.read_parquet(f'new/tx_out-{partition_name}/')
-        tx_out_prev = None
-    return blocks, transactions, tx_in, tx_out, tx_out_prev
+        blocks = dd.read_parquet(files_blocks[i])
+        transactions = dd.read_parquet(files_transactions[i])
+        tx_in = dd.read_parquet(files_tx_in[i])
+        tx_out = dd.read_parquet(files_tx_out[i])
+        tx_out_prev = dd.read_parquet(files_tx_out[i-1])
 
+    return blocks, transactions, tx_in, tx_out, tx_out_prev
+    
 #blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 1)
 
-#transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute()
+#transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute() # 53.223 Transaktionen für 2020
 
 def file_writer(df, filename, schema = None, csv = False, json = False, feature = True):
     '''
@@ -120,6 +108,32 @@ def file_writer(df, filename, schema = None, csv = False, json = False, feature 
         else: 
             df.to_parquet(filename, engine = 'pyarrow', schema = schema)
 
+def helper_csv_to_parquet(filename, columnnames: list, usecols: list, schema: pa.lib.Schema):
+    '''
+    This function iterates over a list of files and saves it as parquet file
+
+    Parameters
+    ----------
+    filename : Names of files to read in
+    columnnames : Descripes the column names
+    usecols : A list to decide which columns should be read in
+    schema : a pyarrow schema to write as parquet file
+
+    Returns
+    -------
+    Parquet files
+
+    ''' 
+    for i in filename:
+        read_df = dd.read_csv(i, 
+                              sep = ';', 
+                              names = columnnames, 
+                              usecols = usecols, 
+                              assume_missing=True, 
+                              sample = 100000)
+        
+        file_writer(read_df, 'to_parquet/' + i.replace('.csv', ''), schema = schema, feature = False)
+        
 def check_df_length(filename, directory = None):
     '''
     This check the length of the generated df and the count of null values
@@ -162,6 +176,7 @@ def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_r
     Files saved in tx_out_filesplit
 
     '''
+    schema = pa.schema([('txid', pa.string()), ('indexOut', pa.float64()), ('value', pa.float64()), ('address', pa.string()), ('nTime', pa.date64())])
     current_save_directory = f'new/tx_in-{filename}'
     tx_out_combined = dd.concat([tx_out, tx_out_prev], axis = 0)
     
@@ -173,16 +188,11 @@ def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_r
     current_df = current_df.merge(blocks, left_on = 'hashBlock', right_on = 'block_hash', how = 'left')
     current_df = current_df[['txid','indexOut', 'value', 'address', 'nTime']]
     
-    current_df['nTime'] = current_df['nTime'].apply(lambda x: unix_in_datetime(x), meta=('nTime_datetime', 'datetime64[ns]'))
+    current_df['nTime'] = dd.to_numeric(current_df['nTime'])
+    current_df['nTime'] = dd.to_datetime(current_df['nTime'], origin = 'unix', unit = 's')
     current_df['value'] = abs(current_df['value']) / 100000000
     
-    file_writer(current_df, current_save_directory, feature = False)
-
-#with ProgressBar():
-#    build_tx_in(tx_in, tx_out, transactions, blocks, transactions_reward, '610682-615423_new')
-
-# Check if df length is ok
-#check_df_length('tx_in-610682-615423_new')
+    file_writer(current_df, current_save_directory, feature = False, schema = schema)
 
 def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
     '''
@@ -208,17 +218,87 @@ def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
     current_df = current_df.merge(blocks, left_on = 'hashBlock', right_on = 'block_hash', how = 'left')
     current_df = current_df[['txid','indexOut', 'value', 'address', 'nTime']]
     
-    current_df['nTime'] = current_df['nTime'].apply(lambda x: unix_in_datetime(x), meta=('nTime_datetime', 'datetime64[ns]'))
+    current_df['nTime'] = dd.to_numeric(current_df['nTime'])
+    current_df['nTime'] = dd.to_datetime(current_df['nTime'], origin = 'unix', unit = 's')
     current_df['value'] = abs(current_df['value']) / 100000000
     
     file_writer(current_df, current_save_directory, feature = False)
 
-#with ProgressBar():
-#    build_tx_out(tx_out, transactions, blocks, transactions_reward, '610682-615423_new')
+def files_parquet(block_col: list, trans_col: list, tx_in_col: list, tx_ou_col: list, files_blocks: list, files_transactions: list, files_tx_in: list, files_tx_out: list):
+    '''
+    This function generates one parquet file for blocks, transactions, tx_in and tx_out for further processing (Runtime: 180 Minuten)
 
-# Check if df length is ok
-#check_df_length('tx_out-610682-615423_new')
+    Parameters
+    ----------
+    block_col : list
+        column names of the block.csv file.
+    trans_col : list
+        column names of the transaction.csv file.
+    tx_in_col : list
+        column names of the tx_in.csv file.
+    tx_ou_col : list
+        column names of the tx_out.csv file.
+    files_blocks: list
+        list with all block files
+    files_transactions: list
+        list with all transaction files
+    files_tx_in: list
+        list with all tx_in files
+    files_tx_out: list
+        list with all tx_out files
 
+    Returns
+    -------
+    Parquet files
+    
+    '''
+    # Schemes for pyarrow
+    block_schema = pa.schema([('block_hash', pa.string()), ('hashPrev', pa.string()), ('height', pa.float64()), ('nTime', pa.string())])
+    transaction_schema = pa.schema([('txid', pa.string()), ('hashBlock', pa.string())])
+    tx_in_schema = pa.schema([('txid', pa.string()), ('hashPrevOut', pa.string()), ('indexPrevOut', pa.int64())])
+    tx_out_schema = pa.schema([('txid', pa.string()), ('indexOut', pa.int64()), ('value', pa.float64()), ('address', pa.string())])
+    
+    # blocks
+    helper_csv_to_parquet(files_blocks[1:], 
+                          columnnames = block_col, 
+                          usecols = ['block_hash', 'hashPrev', 'height', 'nTime'], 
+                          schema = block_schema)  
+    
+    # transactions
+    helper_csv_to_parquet(files_transactions[1:],  
+                          columnnames = trans_col, 
+                          usecols = trans_col[:2], 
+                          schema = transaction_schema)
+    
+    # tx_in
+    helper_csv_to_parquet(files_tx_in[1:],  
+                          columnnames = tx_in_col, 
+                          usecols = tx_in_col[:3], 
+                          schema = tx_in_schema)
+    
+    # tx_out
+    helper_csv_to_parquet(files_tx_out[1:], 
+                          columnnames = tx_ou_col, 
+                          usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], 
+                          schema = tx_out_schema)
+    
+    # Previous tx_out
+    helper_csv_to_parquet(['tx_out-606000-610681.csv'],
+                          columnnames = tx_ou_col,
+                          usecols = [i for i in tx_ou_col if i != 'scriptPubKey'],
+                          schema = tx_out_schema)
+    
+    files_blocks = ['to_parquet/' + i.replace('.csv', '') for i in files_blocks]
+    files_transactions = ['to_parquet/' + i.replace('.csv', '') for i in files_transactions]
+    files_tx_in = ['to_parquet/' + i.replace('.csv', '') for i in files_tx_in]
+    files_tx_out = ['to_parquet/' + i.replace('.csv', '') for i in files_tx_out]
+    
+    for i in range(len(files_tx_in[1:])):
+        temp_blocks, temp_transactions, temp_tx_in, temp_tx_out, temp_tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, i+1, new_files = False)
+        transactions_reward = temp_tx_in[temp_tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute()
+        build_tx_in(temp_tx_in, temp_tx_out, temp_tx_out_prev, temp_transactions, temp_blocks, transactions_reward, files_tx_in[i+1].replace('to_parquet/', 'new/'))
+        build_tx_out(temp_tx_out, temp_transactions, temp_blocks, transactions_reward, files_tx_out[i+1].replace('to_parquet/', 'new/'))
+    
 def progress_and_notification(df, function):
     time = datetime.now().strftime("%H:%M:%S")
     notify_telegram_bot(f'Starting script at {time}.')
