@@ -14,9 +14,9 @@ import pyarrow as pa
 # Read paths and list files
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
 os.chdir(path)
-files_filepath = os.listdir()
-files_blocks = list(filter(re.compile(r"blocks-.*").match, files_filepath))
-files_transactions = list(filter(re.compile(r"transactions-.*").match, files_filepath))
+files_filepath = os.listdir('C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/')
+#files_blocks = list(filter(re.compile(r"blocks-.*").match, files_filepath))
+#files_transactions = list(filter(re.compile(r"transactions-.*").match, files_filepath))
 files_tx_in = list(filter(re.compile(r"tx_in-.*").match, files_filepath))
 files_tx_out = list(filter(re.compile(r"tx_out-.*").match, files_filepath))
 
@@ -37,55 +37,72 @@ btc_exchange_rate_2020 = btc_exchange_rate_2020['Schlusskurs'].to_dict()
 # DarkNet Markets
 darknet_markets = pd.read_csv('DarkNetMarkets.csv', sep = ';', parse_dates = ['Datum'])
 
-def filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, i, new_files = False):
+def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, files_tx_out: list, i: int, blocks = False):
     '''
     Reads in big data files with dask of a file directory with iterator (which entries of file directory should be read - e.g. 0 -> first file of transactions, tx_in, tx_out)
 
     Parameters
     ----------
-    files_transactions : List with all transactions files in directory
-    files_tx_in : List with all tx_in files in directory
-    files_tx_out : List with all tx_out files in directory
-    i : iterator which file should be read
+    files_transactions : list
+        List with all transactions files in directory.
+    files_tx_in : list
+        List with all tx_in files in directory.
+    files_tx_out : list
+        List with all tx_out files in directory.
+    i : int
+        iterator which file should be read.
+    blocks: boolean
+        if true, then read and return blocks, transactions and tx_out_prev
     
     Returns
     -------
-    transactions : dask DataFrame with transactions
-    tx_in : dask DataFrame with tx_in
-    tx_out : dask DataFrame with tx_out
+    blocks: dask.dataframe.core.DataFrame
+        dask DataFrame with blocks.
+    transactions : dask.dataframe.core.DataFrame
+        dask DataFrame with transactions.
+    tx_in : dask.dataframe.core.DataFrame
+        dask DataFrame with tx_in.
+    tx_out : dask.dataframe.core.DataFrame
+        dask DataFrame with tx_out.
+    tx_out_prev: dask.dataframe.core.DataFrame
+        dask DataFrame with the previous tx_out
 
     '''
-    if not new_files:
-        blocks = dd.read_csv(files_blocks[i], sep = ';', names = block_col, usecols = ['block_hash', 'hashPrev', 'height', 'nTime'], assume_missing=True)
-        transactions = dd.read_csv(files_transactions[i], sep = ';', names = trans_col, usecols = trans_col[:2], assume_missing=True)
-        tx_in = dd.read_csv(files_tx_in[i], sep = ';', names = tx_in_col, usecols = tx_in_col[:3], assume_missing=True)
-        tx_out = dd.read_csv(files_tx_out[i], sep = ';', names = tx_ou_col, usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], assume_missing=True)
-        tx_out_prev = dd.read_csv(files_tx_out[i-1], sep = ';', names = tx_ou_col, usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], assume_missing=True)
-    else:
+    if blocks:
         blocks = dd.read_parquet(files_blocks[i])
         transactions = dd.read_parquet(files_transactions[i])
         tx_in = dd.read_parquet(files_tx_in[i])
         tx_out = dd.read_parquet(files_tx_out[i])
-        tx_out_prev = dd.read_parquet(files_tx_out[i-1])
-
-    return blocks, transactions, tx_in, tx_out, tx_out_prev
+        tx_out_prev = dd.read_parquet(files_tx_out[i])
+    
+        return blocks, transactions, tx_in, tx_out, tx_out_prev
+    else:
+        tx_in = dd.read_parquet(files_tx_in[i])
+        tx_out = dd.read_parquet(files_tx_out[i])
+        return tx_in, tx_out
     
 #blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 1)
 
 #transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute() # 53.223 Transaktionen für 2020
 
-def file_writer(df, filename, schema = None, csv = False, json = False, feature = True):
+def file_writer(df, filename, schema = None, csv = False, json = False, feature = True, overwrite = False):
     '''
     This function saves a file as parquet, csv or json
 
     Parameters
     ----------
-    df : Dataframe to process
-    filename : Filename for output
-    schema : is a parquet schema for pyarrow engine
-    csv : boolean if true writes a csv file
-    json : boolean if true writes a json file (if csv is also true, than only a csv file is saved)
-    feature : boolean if true saves at files directory of features
+    df : dask.dataframe.core.DataFrame
+        Dataframe to process.
+    filename : string
+        Filename for output.
+    schema : 
+        is a parquet schema for pyarrow engine.
+    csv : boolean
+        boolean if true writes a csv file.
+    json : boolean
+        boolean if true writes a json file (if csv is also true, than only a csv file is saved).
+    feature : boolean
+        boolean if true saves at files directory of features.
     
     Returns
     -------
@@ -104,36 +121,10 @@ def file_writer(df, filename, schema = None, csv = False, json = False, feature 
         df.to_json(filename, orient = 'records') 
     else:
         if schema == None:
-            df.to_parquet(filename, engine = 'pyarrow')
+            df.to_parquet(filename, engine = 'pyarrow', overwrite = overwrite)
         else: 
-            df.to_parquet(filename, engine = 'pyarrow', schema = schema)
-
-def helper_csv_to_parquet(filename, columnnames: list, usecols: list, schema: pa.lib.Schema):
-    '''
-    This function iterates over a list of files and saves it as parquet file
-
-    Parameters
-    ----------
-    filename : Names of files to read in
-    columnnames : Descripes the column names
-    usecols : A list to decide which columns should be read in
-    schema : a pyarrow schema to write as parquet file
-
-    Returns
-    -------
-    Parquet files
-
-    ''' 
-    for i in filename:
-        read_df = dd.read_csv(i, 
-                              sep = ';', 
-                              names = columnnames, 
-                              usecols = usecols, 
-                              assume_missing=True, 
-                              sample = 100000)
-        
-        file_writer(read_df, 'to_parquet/' + i.replace('.csv', ''), schema = schema, feature = False)
-        
+            df.to_parquet(filename, engine = 'pyarrow', schema = schema, overwrite = overwrite)
+ 
 def check_df_length(filename, directory = None):
     '''
     This check the length of the generated df and the count of null values
@@ -157,147 +148,6 @@ def check_df_length(filename, directory = None):
         print(df.isnull().sum().compute())
         print(df.head())
 
-def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_reward, filename):
-    '''
-    This builds the tx_in file with all informations needed (Runtime: 10 Minuten)
-
-    Parameters
-    ----------
-    tx_in : The sender transactions
-    tx_out : The receiver transactions
-    tx_out_prev : The previous receiver transactions (needed because of data structure (reference to previous transaction that could be outside of the current month))
-    transactions : The transactions as links to blocks
-    blocks : The blocks
-    transactions_reward : The reward transactions to ignore in the new build df
-    filename : The name for the new file
-
-    Returns
-    -------
-    Files saved in tx_out_filesplit
-
-    '''
-    schema = pa.schema([('txid', pa.string()), ('indexOut', pa.float64()), ('value', pa.float64()), ('address', pa.string()), ('nTime', pa.date64())])
-    current_save_directory = f'new/tx_in-{filename}'
-    tx_out_combined = dd.concat([tx_out, tx_out_prev], axis = 0)
-    
-    current_df = tx_in[~tx_in['txid'].isin(transactions_reward)]
-    current_df = current_df.merge(tx_out_combined, left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left')
-    current_df = current_df[['txid_x','indexOut', 'value', 'address']]
-    current_df = current_df.rename(columns = {'txid_x': 'txid'})
-    current_df = current_df.merge(transactions, on = 'txid', how = 'left')
-    current_df = current_df.merge(blocks, left_on = 'hashBlock', right_on = 'block_hash', how = 'left')
-    current_df = current_df[['txid','indexOut', 'value', 'address', 'nTime']]
-    
-    current_df['nTime'] = dd.to_numeric(current_df['nTime'])
-    current_df['nTime'] = dd.to_datetime(current_df['nTime'], origin = 'unix', unit = 's')
-    current_df['value'] = abs(current_df['value']) / 100000000
-    
-    file_writer(current_df, current_save_directory, feature = False, schema = schema)
-
-def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
-    '''
-    This builds the tx_in file with all informations needed (Runtime: 6 Minuten)
-
-    Parameters
-    ----------
-    tx_out : The receiver transactions
-    transactions : The transactions as links to blocks
-    blocks : The blocks
-    transactions_reward : The reward transactions to ignore in the new build df
-    filename : The name for the new file
-
-    Returns
-    -------
-    Files saved in tx_out_filesplit
-
-    '''
-    current_save_directory = f'new/tx_out-{filename}'
-    
-    current_df = tx_out[~tx_out['txid'].isin(transactions_reward)]
-    current_df = current_df.merge(transactions, on = 'txid', how = 'left')
-    current_df = current_df.merge(blocks, left_on = 'hashBlock', right_on = 'block_hash', how = 'left')
-    current_df = current_df[['txid','indexOut', 'value', 'address', 'nTime']]
-    
-    current_df['nTime'] = dd.to_numeric(current_df['nTime'])
-    current_df['nTime'] = dd.to_datetime(current_df['nTime'], origin = 'unix', unit = 's')
-    current_df['value'] = abs(current_df['value']) / 100000000
-    
-    file_writer(current_df, current_save_directory, feature = False)
-
-def files_parquet(block_col: list, trans_col: list, tx_in_col: list, tx_ou_col: list, files_blocks: list, files_transactions: list, files_tx_in: list, files_tx_out: list):
-    '''
-    This function generates one parquet file for blocks, transactions, tx_in and tx_out for further processing (Runtime: 180 Minuten)
-
-    Parameters
-    ----------
-    block_col : list
-        column names of the block.csv file.
-    trans_col : list
-        column names of the transaction.csv file.
-    tx_in_col : list
-        column names of the tx_in.csv file.
-    tx_ou_col : list
-        column names of the tx_out.csv file.
-    files_blocks: list
-        list with all block files
-    files_transactions: list
-        list with all transaction files
-    files_tx_in: list
-        list with all tx_in files
-    files_tx_out: list
-        list with all tx_out files
-
-    Returns
-    -------
-    Parquet files
-    
-    '''
-    # Schemes for pyarrow
-    block_schema = pa.schema([('block_hash', pa.string()), ('hashPrev', pa.string()), ('height', pa.float64()), ('nTime', pa.string())])
-    transaction_schema = pa.schema([('txid', pa.string()), ('hashBlock', pa.string())])
-    tx_in_schema = pa.schema([('txid', pa.string()), ('hashPrevOut', pa.string()), ('indexPrevOut', pa.int64())])
-    tx_out_schema = pa.schema([('txid', pa.string()), ('indexOut', pa.int64()), ('value', pa.float64()), ('address', pa.string())])
-    
-    # blocks
-    helper_csv_to_parquet(files_blocks[1:], 
-                          columnnames = block_col, 
-                          usecols = ['block_hash', 'hashPrev', 'height', 'nTime'], 
-                          schema = block_schema)  
-    
-    # transactions
-    helper_csv_to_parquet(files_transactions[1:],  
-                          columnnames = trans_col, 
-                          usecols = trans_col[:2], 
-                          schema = transaction_schema)
-    
-    # tx_in
-    helper_csv_to_parquet(files_tx_in[1:],  
-                          columnnames = tx_in_col, 
-                          usecols = tx_in_col[:3], 
-                          schema = tx_in_schema)
-    
-    # tx_out
-    helper_csv_to_parquet(files_tx_out[1:], 
-                          columnnames = tx_ou_col, 
-                          usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], 
-                          schema = tx_out_schema)
-    
-    # Previous tx_out
-    helper_csv_to_parquet(['tx_out-606000-610681.csv'],
-                          columnnames = tx_ou_col,
-                          usecols = [i for i in tx_ou_col if i != 'scriptPubKey'],
-                          schema = tx_out_schema)
-    
-    files_blocks = ['to_parquet/' + i.replace('.csv', '') for i in files_blocks]
-    files_transactions = ['to_parquet/' + i.replace('.csv', '') for i in files_transactions]
-    files_tx_in = ['to_parquet/' + i.replace('.csv', '') for i in files_tx_in]
-    files_tx_out = ['to_parquet/' + i.replace('.csv', '') for i in files_tx_out]
-    
-    for i in range(len(files_tx_in[1:])):
-        temp_blocks, temp_transactions, temp_tx_in, temp_tx_out, temp_tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, i+1, new_files = False)
-        transactions_reward = temp_tx_in[temp_tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute()
-        build_tx_in(temp_tx_in, temp_tx_out, temp_tx_out_prev, temp_transactions, temp_blocks, transactions_reward, files_tx_in[i+1].replace('to_parquet/', 'new/'))
-        build_tx_out(temp_tx_out, temp_transactions, temp_blocks, transactions_reward, files_tx_out[i+1].replace('to_parquet/', 'new/'))
     
 def progress_and_notification(df, function):
     time = datetime.now().strftime("%H:%M:%S")
@@ -313,7 +163,7 @@ def progress_and_notification(df, function):
     notify_telegram_bot(f'Finished script at {time}.')
     return temp
         
-blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, None, None, 1, True)
+#blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, None, None, 1, True)
 
 def helper_count_transactions(df, filename):
     '''
@@ -351,10 +201,10 @@ def count_transactions(tx_in, tx_out, partition_name):
     Files with the count of transactions the address is involved, seperated by sender, receiver, all and sender = receiver transactions
 
     '''
-    filename_sender = f'final_count_sender_transactions_{partition_name}'
-    filename_receiver = f'final_count_receiver_transactions_{partition_name}'
-    filename_all = f'final_count_transactions_{partition_name}'
-    filename_equal = f'final_count_receiver_eqal_sender_transactions_{partition_name}'
+    filename_sender = f'count_sender_transactions_{partition_name}'
+    filename_receiver = f'count_receiver_transactions_{partition_name}'
+    filename_all = f'count_transactions_{partition_name}'
+    filename_equal = f'count_receiver_eqal_sender_transactions_{partition_name}'
     
     helper_count_transactions(tx_in, filename_sender)
     helper_count_transactions(tx_out, filename_receiver)
@@ -370,7 +220,7 @@ def count_transactions(tx_in, tx_out, partition_name):
     df_receiver_equal_sender = df_receiver_equal_sender.reset_index()
     file_writer(df_receiver_equal_sender, filename_equal)
 
-def helper_lifetime_address(tx_in, tx_out):
+def lifetime_address(tx_in, tx_out, partition_name):
     '''
     This function calculates the min and max date of an address
 
@@ -384,33 +234,57 @@ def helper_lifetime_address(tx_in, tx_out):
     df : with min and max date
 
     '''
+    filename = f'lifetime_address_{partition_name}'
     df = dd.concat([tx_in[['address', 'nTime']], tx_out[['address', 'nTime']]], axis = 0)
-    df_min = df.groupby('address')['nTime'].min()
-    df_min = df_min.reset_index()
-    df_max = df.groupby('address')['nTime'].max()
-    df_max = df_max.reset_index()
-    df = df_min.merge(df_max, on = 'address', how = 'inner')
-    return df
+    df = df.groupby('address')['nTime'].aggregate(['min', 'max'])
+    df = df.reset_index()
+    file_writer(df, filename)
 
-def lifetime_address(tx_in, tx_out, partition_name):
+def final_lifetime_address():
     '''
-    This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 10 min)
-
-    Parameters
-    ----------
-    tx_in : Sender transactions
-    tx_out : Receiver transactions
+    This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 6 h 15 min)
 
     Returns
     -------
     File with lifetime of an address
 
     '''
-    filename = f'final_lifetime_address_{partition_name}'
+    filereader = 'features/lifetime_address'
+    filename = 'final_lifetime_address'
+    
+    df = dd.concat([dd.read_parquet(filereader, engine = 'fastparquet')], axis = 0, ignore_order = True)
+    df = df.groupby('address').aggregate({'min': 'min', 'max': 'max'})
+    df = df.reset_index()
+    df['max'] = df['max'].dt.ceil(freq = 'D')
+    df['min'] = df['min'].dt.floor(freq = 'D')
+    df['lifetime'] = (df['max'] - df['min']).dt.days
+    df = df[['address', 'lifetime']]
+    file_writer(df, filename)
+    
+def final_lifetime_address():
+    '''
+    This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 10 min)
 
-    df = helper_lifetime_address(tx_in, tx_out)
+    Returns
+    -------
+    File with lifetime of an address
 
-    df['lifetime'] = (df['nTime_y'] - df['nTime_x']).dt.days + 1
+    '''
+    files_filepath = os.listdir('features/lifetime_address')
+    filereader = ['features/lifetime_address/' + i for i in files_filepath]
+    filename = 'final_lifetime_address'
+    
+    df = dd.read_parquet(filereader[0], engine = 'fastparquet')
+    file_writer(df, 'temp_df', feature = False, overwrite = True)
+    
+    for i in range(1, len(filereader)):
+        df = dd.concat([df, dd.read_parquet(filereader[i], engine = 'fastparquet')], axis = 0, ignore_order = True)
+        df = df.groupby('address').aggregate({'min': 'min', 'max': 'max'})
+        df = df.reset_index()
+            
+    df['max'] = df['max'].dt.ceil(freq = 'D')
+    df['min'] = df['min'].dt.floor(freq = 'D')
+    df['lifetime'] = (df['max'] - df['min']).dt.days
     df = df[['address', 'lifetime']]
     file_writer(df, filename)
 
@@ -480,9 +354,9 @@ def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
         tx_in, tx_out = helper_exchange_rate(tx_in, tx_out)
         text = '_euro'
     
-    filename_all = f'final_sum_transaction_value_all{text}_{partition_name}'
-    filename_sender = f'final_sum_transaction_value_sender{text}_{partition_name}'
-    filename_receiver = f'final_sum_transaction_value_receiver{text}_{partition_name}'
+    filename_all = f'sum_transaction_value_all{text}_{partition_name}'
+    filename_sender = f'sum_transaction_value_sender{text}_{partition_name}'
+    filename_receiver = f'sum_transaction_value_receiver{text}_{partition_name}'
     
     helper_sum_transaction_value(tx_in, filename_sender, euro)
     helper_sum_transaction_value(tx_out, filename_receiver, euro)
@@ -533,9 +407,9 @@ def max_min_transaction_value_btc(tx_in, tx_out, partition_name, max_boolean = T
     if max:
         text = 'max'
         
-    filename_all = f'final_{text}_transaction_value_all_{partition_name}'
-    filename_sender = f'final_{text}_transaction_value_sender_{partition_name}'
-    filename_receiver = f'final_{text}_transaction_value_receiver_{partition_name}'
+    filename_all = f'{text}_transaction_value_all_{partition_name}'
+    filename_sender = f'{text}_transaction_value_sender_{partition_name}'
+    filename_receiver = f'{text}_transaction_value_receiver_{partition_name}'
     
     helper_max_min(tx_in, filename_sender, max_boolean)
     helper_max_min(tx_out, filename_receiver, max_boolean)
@@ -577,9 +451,9 @@ def transaction_fee(tx_in, tx_out, partition_name):
     File with transaction fees
 
     '''
-    filename_all = f'final_transaction_fee_{partition_name}'
-    filename_sender = f'final_transaction_fee_sender_{partition_name}'
-    filename_receiver = f'final_transaction_fee_receiver_{partition_name}'
+    filename_all = f'transaction_fee_{partition_name}'
+    filename_sender = f'transaction_fee_sender_{partition_name}'
+    filename_receiver = f'transaction_fee_receiver_{partition_name}'
     
     df_fee = tx_in.groupby('txid')['value'].sum().reset_index().merge(tx_out.groupby('txid')['value'].sum().reset_index(), on = 'txid', how = 'left')
     df_fee['fee'] = df_fee['value_x'] - df_fee['value_y']
@@ -629,9 +503,9 @@ def time_transactions(tx_in, tx_out, partition_name):
     Files with time differences per sender, receiver and all transactions 
 
     '''
-    filename_all = f'final_transaction_time_diff_{partition_name}'
-    filename_sender = f'final_transaction_time_diff_sender_{partition_name}'
-    filename_receiver = f'final_transaction_time_diff_receiver_{partition_name}'
+    filename_all = f'transaction_time_diff_{partition_name}'
+    filename_sender = f'transaction_time_diff_sender_{partition_name}'
+    filename_receiver = f'transaction_time_diff_receiver_{partition_name}'
     
     helper_time_transactions(tx_in, filename_sender)
     helper_time_transactions(tx_out, filename_receiver)
@@ -655,9 +529,9 @@ def std_transaction_value(tx_in, tx_out, partition_name):
     Files with the standard deviation of the transaction value from sender, receiver and all transactions
 
     
-    filename_all = f'final_std_transaction_value_all_{partition_name}'
-    filename_sender = f'final_std_transaction_value_sender_{partition_name}'
-    filename_receiver = f'final_std_transaction_value_receiver_{partition_name}'
+    filename_all = f'std_transaction_value_all_{partition_name}'
+    filename_sender = f'std_transaction_value_sender_{partition_name}'
+    filename_receiver = f'std_transaction_value_receiver_{partition_name}'
     
     df = tx_in.groupby('address')['value'].std()
     df = df.reset_index()
@@ -734,9 +608,9 @@ def count_addresses(tx_in, tx_out, partition_name):
     Files with the count of addresses from unique senders, receivers and all transactions (excluded the own address)
 
     '''
-    filename_all = f'final_count_addresses_all_{partition_name}'
-    filename_sender = f'final_count_addresses_sender_{partition_name}'
-    filename_receiver = f'final_count_addresses_receiver_{partition_name}'
+    filename_all = f'count_addresses_all_{partition_name}'
+    filename_sender = f'count_addresses_sender_{partition_name}'
+    filename_receiver = f'count_addresses_receiver_{partition_name}'
 
     helper_count_addresses(tx_in, filename_sender)
     helper_count_addresses(tx_out, filename_receiver)
@@ -759,10 +633,10 @@ def balance(tx_in, tx_out, partition_name):
 
     '''
     '''
-    filename_std = f'final_std_balance_{partition_name}'
-    filename_mean = f'final_mean_balance_{partition_name}' 
+    filename_std = f'std_balance_{partition_name}'
+    filename_mean = f'mean_balance_{partition_name}' 
     '''
-    filename = f'final_balance_per_address_after_each_transaction_{partition_name}' 
+    filename = f'balance_per_address_after_each_transaction_{partition_name}' 
     
     tx_in['value'] = tx_in['value'] * (-1)
     
@@ -794,20 +668,20 @@ def count_addresses_per_transaction(tx_in, tx_out, partition_name):
 
     '''
     '''
-    filename_sender_mean = f'final_mean_count_sender_addresses_per_transaction_{partition_name}'
-    filename_receiver_mean = f'final_mean_count_receiver_addresses_per_transaction_{partition_name}'
-    filename_all_mean = f'final_mean_count_addresses_per_transaction_{partition_name}'
-    filename_sender_min = f'final_min_count_sender_addresses_per_transaction_{partition_name}'
-    filename_receiver_min = f'final_min_count_receiver_addresses_per_transaction_{partition_name}'
-    filename_all_min = f'final_min_count_addresses_per_transaction_{partition_name}'
-    filename_sender_max = f'final_max_count_sender_addresses_per_transaction_{partition_name}'
-    filename_receiver_max = f'final_max_count_receiver_addresses_per_transaction_{partition_name}'
-    filename_all_max = f'final_max_count_addresses_per_transaction_{partition_name}'
-    filename_sender_std = f'final_std_count_sender_addresses_per_transaction_{partition_name}'
-    filename_receiver_std = f'final_std_count_receiver_addresses_per_transaction_{partition_name}'
-    filename_all_std = f'final_std_addresses_per_transaction_{partition_name}'
+    filename_sender_mean = f'mean_count_sender_addresses_per_transaction_{partition_name}'
+    filename_receiver_mean = f'mean_count_receiver_addresses_per_transaction_{partition_name}'
+    filename_all_mean = f'mean_count_addresses_per_transaction_{partition_name}'
+    filename_sender_min = f'min_count_sender_addresses_per_transaction_{partition_name}'
+    filename_receiver_min = f'min_count_receiver_addresses_per_transaction_{partition_name}'
+    filename_all_min = f'min_count_addresses_per_transaction_{partition_name}'
+    filename_sender_max = f'max_count_sender_addresses_per_transaction_{partition_name}'
+    filename_receiver_max = f'max_count_receiver_addresses_per_transaction_{partition_name}'
+    filename_all_max = f'max_count_addresses_per_transaction_{partition_name}'
+    filename_sender_std = f'std_count_sender_addresses_per_transaction_{partition_name}'
+    filename_receiver_std = f'std_count_receiver_addresses_per_transaction_{partition_name}'
+    filename_all_std = f'std_addresses_per_transaction_{partition_name}'
     '''
-    filename = f'final_count_addresses_per_transaction_{partition_name}'
+    filename = f'count_addresses_per_transaction_{partition_name}'
     count_transactions = tx_in.groupby('txid')['nTime'].count()
     count_transactions = count_transactions.reset_index()
     tx_out = tx_out.groupby('txid')['nTime'].count()
@@ -839,7 +713,16 @@ def count_addresses_per_transaction(tx_in, tx_out, partition_name):
 
 def active_darknet_markets(tx_in, tx_out, partition_name):
     df = helper_lifetime_address(tx_in, tx_out)
-    df['count_darknet'] = df.groupby('address').apply(lambda x: darknet_markets[(x['nTime_x'] =< darknet_markets['Datum']) and (darknet_markets['Datum'] <= x['nTime_y'])].mean(), meta = ('count_darknet_markets', 'float64'))
+    #df['count_darknet'] = df.groupby('address').apply(lambda x: darknet_markets[(x['nTime_x'] =< darknet_markets['Datum']) and (darknet_markets['Datum'] <= x['nTime_y'])].mean(), meta = ('count_darknet_markets', 'float64'))
     
     df.groupby('address').apply(lambda x: darknet_markets[((darknet_markets['Datum'] >= x['nTime_x']) & (darknet_markets['Datum'] <= x['nTime_y']))]['Anzahl'].mean(), meta = ('count_darknet_markets', 'object'))
-    return df.head()                                                           
+    return df.head()               
+
+def combine_std(x):
+    means = x['means']
+    lengths = x['lengths']
+    stds = x['stds']
+    mean_all = np.sum(means * lengths)
+    deviance = np.sum((lengths - 1) * stds) + np.sum(lengths * ((means - mean_all)**2))
+    sd = 1 / (np.sum(lengths) - 1) * deviance
+    return sd                                            
