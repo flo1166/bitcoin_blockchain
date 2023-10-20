@@ -37,6 +37,9 @@ btc_exchange_rate_2020 = btc_exchange_rate_2020['Schlusskurs'].to_dict()
 # DarkNet Markets
 darknet_markets = pd.read_csv('DarkNetMarkets.csv', sep = ';', parse_dates = ['Datum'])
 
+# Adresses used for research (illegal and legal)
+addresses_used = dd.concat([dd.read_parquet('illegal_addresses'), dd.read_parquet('sample_legal_addresses')], axis = 0).compute()
+
 def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, files_tx_out: list, i: int, blocks = False):
     '''
     Reads in big data files with dask of a file directory with iterator (which entries of file directory should be read - e.g. 0 -> first file of transactions, tx_in, tx_out)
@@ -45,12 +48,16 @@ def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, 
     ----------
     files_transactions : list
         List with all transactions files in directory.
+        
     files_tx_in : list
         List with all tx_in files in directory.
+        
     files_tx_out : list
         List with all tx_out files in directory.
+        
     i : int
         iterator which file should be read.
+        
     blocks: boolean
         if true, then read and return blocks, transactions and tx_out_prev
     
@@ -58,12 +65,16 @@ def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, 
     -------
     blocks: dask.dataframe.core.DataFrame
         dask DataFrame with blocks.
+        
     transactions : dask.dataframe.core.DataFrame
         dask DataFrame with transactions.
+        
     tx_in : dask.dataframe.core.DataFrame
         dask DataFrame with tx_in.
+        
     tx_out : dask.dataframe.core.DataFrame
         dask DataFrame with tx_out.
+        
     tx_out_prev: dask.dataframe.core.DataFrame
         dask DataFrame with the previous tx_out
 
@@ -93,14 +104,19 @@ def file_writer(df, filename, schema = None, csv = False, json = False, feature 
     ----------
     df : dask.dataframe.core.DataFrame
         Dataframe to process.
+        
     filename : string
         Filename for output.
+        
     schema : 
         is a parquet schema for pyarrow engine.
+        
     csv : boolean
         boolean if true writes a csv file.
+        
     json : boolean
         boolean if true writes a json file (if csv is also true, than only a csv file is saved).
+        
     feature : boolean
         boolean if true saves at files directory of features.
     
@@ -165,14 +181,20 @@ def progress_and_notification(df, function):
         
 #blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, None, None, 1, True)
 
-def helper_count_transactions(df, filename):
+def helper_count_transactions(df, addresses_used, filename):
     '''
     This function helps the count_transactions function to counts transactions per address
 
     Parameters
     ----------
-    df : Dataframe to process
-    filename : Name to output as file
+    df : dask.dataframe.core.DataFrame
+        Dataframe to process.
+        
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    filename : string
+        Name to output as file.
 
     Returns
     -------
@@ -184,18 +206,27 @@ def helper_count_transactions(df, filename):
     df = df.groupby('address')['txid'].count()
     df = df.reset_index()
     df = df.rename(columns = {'txid': 'count_transactions'})
+    df = df[df['address'].isin(addresses_used['address'])]
     file_writer(df, filename)
 
-def count_transactions(tx_in, tx_out, partition_name):
+def count_transactions(tx_in, tx_out, addresses_used, partition_name):
     '''
     This Function counts transactions per bitcoin address (Runtime: 40 Min).
 
     Parameters
     ----------
-    tx_in : Sender transactions
-    tx_out : Receiver transactions
-    partition_name : The height of the blocks for the investigated month
-
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions.
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions.
+        
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    partition_name : string
+        The height of the blocks for the investigated month.
+    
     Returns
     -------
     Files with the count of transactions the address is involved, seperated by sender, receiver, all and sender = receiver transactions
@@ -206,10 +237,10 @@ def count_transactions(tx_in, tx_out, partition_name):
     filename_all = f'count_transactions_{partition_name}'
     filename_equal = f'count_receiver_eqal_sender_transactions_{partition_name}'
     
-    helper_count_transactions(tx_in, filename_sender)
-    helper_count_transactions(tx_out, filename_receiver)
+    helper_count_transactions(tx_in, addresses_used, filename_sender)
+    helper_count_transactions(tx_out, addresses_used, filename_receiver)
     df = dd.concat([tx_in[['address', 'txid', 'value']], tx_out[['address', 'txid', 'value']]], axis = 0)
-    helper_count_transactions(df, filename_all)
+    helper_count_transactions(df, addresses_used, filename_all)
     
     df_receiver_equal_sender = tx_in[['address', 'txid', 'value']]
     df_receiver_equal_sender = df_receiver_equal_sender.merge(tx_out[['address', 'txid', 'value']], on = 'txid', how = 'inner')
@@ -218,89 +249,63 @@ def count_transactions(tx_in, tx_out, partition_name):
     df_receiver_equal_sender = df_receiver_equal_sender.reset_index()
     df_receiver_equal_sender = df_receiver_equal_sender.groupby('address_x')['count_receiver_equal_sender_transactions'].sum()
     df_receiver_equal_sender = df_receiver_equal_sender.reset_index()
+    df_receiver_equal_sender = df_receiver_equal_sender[df_receiver_equal_sender['address'].isin(addresses_used['address'])]
     file_writer(df_receiver_equal_sender, filename_equal)
 
-def lifetime_address(tx_in, tx_out, partition_name):
+def lifetime_address(tx_in, tx_out, addresses_used, partition_name):
     '''
-    This function calculates the min and max date of an address
-
+    This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 6 h 15 min)
+ 
     Parameters
-    ----------
-    tx_in : Sender transactions
-    tx_out : Receiver transactions
-
+    ----------   
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions.
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions.
+        
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    partition_name : string
+        The height of the blocks for the investigated month.
+        
     Returns
     -------
-    df : with min and max date
-
+    File with lifetime of an address
+    
     '''
     filename = f'lifetime_address_{partition_name}'
+    
     df = dd.concat([tx_in[['address', 'nTime']], tx_out[['address', 'nTime']]], axis = 0)
     df = df.groupby('address')['nTime'].aggregate(['min', 'max'])
     df = df.reset_index()
-    file_writer(df, filename)
-
-def final_lifetime_address():
-    '''
-    This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 6 h 15 min)
-
-    Returns
-    -------
-    File with lifetime of an address
-
-    '''
-    filereader = 'features/lifetime_address'
-    filename = 'final_lifetime_address'
-    
-    df = dd.concat([dd.read_parquet(filereader, engine = 'fastparquet')], axis = 0, ignore_order = True)
-    df = df.groupby('address').aggregate({'min': 'min', 'max': 'max'})
-    df = df.reset_index()
     df['max'] = df['max'].dt.ceil(freq = 'D')
     df['min'] = df['min'].dt.floor(freq = 'D')
     df['lifetime'] = (df['max'] - df['min']).dt.days
     df = df[['address', 'lifetime']]
+    df = df[df['address'].isin(addresses_used['address'])]
     file_writer(df, filename)
     
-def final_lifetime_address():
-    '''
-    This function calculates the lifetime of the first transaction until the last transaction for each address (Runtime: 10 min)
-
-    Returns
-    -------
-    File with lifetime of an address
-
-    '''
-    files_filepath = os.listdir('features/lifetime_address')
-    filereader = ['features/lifetime_address/' + i for i in files_filepath]
-    filename = 'final_lifetime_address'
-    
-    df = dd.read_parquet(filereader[0], engine = 'fastparquet')
-    file_writer(df, 'temp_df', feature = False, overwrite = True)
-    
-    for i in range(1, len(filereader)):
-        df = dd.concat([df, dd.read_parquet(filereader[i], engine = 'fastparquet')], axis = 0, ignore_order = True)
-        df = df.groupby('address').aggregate({'min': 'min', 'max': 'max'})
-        df = df.reset_index()
-            
-    df['max'] = df['max'].dt.ceil(freq = 'D')
-    df['min'] = df['min'].dt.floor(freq = 'D')
-    df['lifetime'] = (df['max'] - df['min']).dt.days
-    df = df[['address', 'lifetime']]
-    file_writer(df, filename)
-
 def helper_exchange_rate(tx_in, tx_out):
     '''
     This function converts tx_in and tx_out from btc to euro
 
     Parameters
     ----------
-    tx_in : Sender transactions with value in btc
-    tx_out : Receiver transactions with value in btc
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions with value in btc.
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions with value in btc.
 
     Returns
     -------
-    tx_in : Sender transactions with value in euro
-    tx_out : Receiver transactions with value in euro
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions with value in euro
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions with value in euro
 
     '''
     tx_in['nTime'] = tx_in['nTime'].dt.strftime('%Y-%m-%d')
@@ -311,14 +316,23 @@ def helper_exchange_rate(tx_in, tx_out):
     tx_out['value'] = tx_out['value'] * tx_out['nTime']
     return tx_in, tx_out
 
-def helper_sum_transaction_value(df, filename, euro):
+def helper_sum_transaction_value(df, addresses_used, filename, euro):
     '''
     This function helps the sum_transaction_value_btc function to determine the sum of each address and saves it as file.
 
     Parameters
     ----------
-    df : Dataframe to process
-    filename : Name to output as file
+    df : dask.dataframe.core.DataFrame
+        Dataframe to process.
+        
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    filename : string
+        Name to output as file.
+        
+    euro : boolean
+        if in euro (true) or btc (false).
 
     Returns
     -------
@@ -331,18 +345,29 @@ def helper_sum_transaction_value(df, filename, euro):
         df = df.rename(columns = {'value': 'sum_trans_value_euro'})
     else:
         df = df.rename(columns = {'value': 'sum_trans_value_btc'})
+    df = df[df['address'].isin(addresses_used['address'])]
     file_writer(df, filename)
 
-def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
+def sum_transaction_value_btc(tx_in, tx_out, addresses_used, partition_name, euro = False):
     '''
     This function calculates the sum of the transaction value in btc per address (Runtime: 13 Minuten)
 
     Parameters
     ----------
-    tx_in : Sender transactions
-    tx_out : Receiver transactions
-    partition_name : The height of the blocks for the investigated month
-    euro : if in euro (true) or btc (false)
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions.
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions.
+        
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    partition_name : string
+        The height of the blocks for the investigated month.
+        
+    euro : boolean
+        if in euro (true) or btc (false).
     
     Returns
     -------
@@ -358,11 +383,11 @@ def sum_transaction_value_btc(tx_in, tx_out, partition_name, euro = False):
     filename_sender = f'sum_transaction_value_sender{text}_{partition_name}'
     filename_receiver = f'sum_transaction_value_receiver{text}_{partition_name}'
     
-    helper_sum_transaction_value(tx_in, filename_sender, euro)
-    helper_sum_transaction_value(tx_out, filename_receiver, euro)
+    helper_sum_transaction_value(tx_in, addresses_used, filename_sender, euro)
+    helper_sum_transaction_value(tx_out, addresses_used, filename_receiver, euro)
     
     df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
-    helper_sum_transaction_value(df, filename_all, euro)
+    helper_sum_transaction_value(df, addresses_used, filename_all, euro)
 
 def helper_max_min(df, filename, max_boolean):
     '''
@@ -371,7 +396,9 @@ def helper_max_min(df, filename, max_boolean):
     Parameters
     ----------
     df : Dataframe to process
+    
     filename : Name to output as file
+    
     max_boolean : if maximum (true) or minium (false) should be calculated
 
     Returns
@@ -394,8 +421,11 @@ def max_min_transaction_value_btc(tx_in, tx_out, partition_name, max_boolean = T
     Parameters
     ----------
     tx_in : Sender transactions
+    
     tx_out : Receiver transactions
+    
     partition_name : The height of the blocks for the investigated month
+    
     max_boolean : if maximum (true) or minium (false) should be calculated
 
     Returns
@@ -416,35 +446,78 @@ def max_min_transaction_value_btc(tx_in, tx_out, partition_name, max_boolean = T
     df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
     helper_max_min(df, filename_all, max_boolean)
 
-def helper_transaction_fee(df, df_fee, filename):
+def helper_transaction_fee(df, df_fee, addresses_used, filename):
     '''
     This is the helper function for the funciton transaction fee to shorten the code
 
     Parameters
     ----------
-    df : Dataframe to process
-    df_fee : Dataframe with fees
-    filename : Name to output as file
+    df : dask.dataframe.core.DataFrame
+        Dataframe to process.
+        
+    df_fee : dask.dataframe.core.DataFrame
+        Dataframe with fees.
+
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    filename : string
+        Name to output as file
 
     Returns
     -------
     File with transaction fees
 
     '''
+    df = df[df['address'].isin(addresses_used['address'])]
     df = df.merge(df_fee, on = 'txid', how = 'left')
     df = df.groupby('address')['fee'].sum()
     df = df.reset_index()
     file_writer(df, filename)
 
-def transaction_fee(tx_in, tx_out, partition_name):
+def helper_df_fee(tx_in, tx_out):
+    '''
+    This function helps to create the fee dataframe (Runtime: ).
+
+    Parameters
+    ----------
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions
+
+    Returns
+    -------
+    temp_df_fee DataFrame to calculate the transaction fees
+
+    '''
+    temp_tx_out = tx_out.groupby('txid')['value'].sum()
+    temp_tx_out = temp_tx_out.reset_index()
+    df_fee = tx_in.groupby('txid')['value'].sum()
+    df_fee = df_fee.reset_index()
+    df_fee = df_fee.merge(temp_tx_out, on = 'txid', how = 'left')
+    df_fee['fee'] = df_fee['value_x'] - df_fee['value_y']
+    df_fee = df_fee[['txid', 'fee']]
+    file_writer(df_fee, 'temp_df_fee', feature = False)
+
+def transaction_fee(tx_in, tx_out, addresses_used, partition_name):
     '''
     This function calculates the transaction fees (Runtime: 168 Minuten)
 
     Parameters
     ----------
-    tx_in : Sender transactions
-    tx_out : Receiver transactions
-    partition_name : The height of the blocks for the investigated month
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions
+
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    partition_name : string
+        The height of the blocks for the investigated month
     
     Returns
     -------
@@ -455,28 +528,33 @@ def transaction_fee(tx_in, tx_out, partition_name):
     filename_sender = f'transaction_fee_sender_{partition_name}'
     filename_receiver = f'transaction_fee_receiver_{partition_name}'
     
-    df_fee = tx_in.groupby('txid')['value'].sum().reset_index().merge(tx_out.groupby('txid')['value'].sum().reset_index(), on = 'txid', how = 'left')
-    df_fee['fee'] = df_fee['value_x'] - df_fee['value_y']
-    df_fee = df_fee[['txid', 'fee']]
+    helper_df_fee(tx_in, tx_out)
+    df_fee = dd.read_parquet('temp_df_fee')
     
-    helper_transaction_fee(tx_in, df_fee, filename_sender)
-    helper_transaction_fee(tx_out, df_fee, filename_receiver)
+    helper_transaction_fee(tx_in, df_fee, addresses_used, filename_sender)
+    helper_transaction_fee(tx_out, df_fee, addresses_used, filename_receiver)
     
     df = dd.concat([tx_in[['txid', 'address', 'value']], tx_out[['txid', 'address', 'value']]], axis = 0)
-    helper_transaction_fee(df, df_fee, filename_all)
+    helper_transaction_fee(df, df_fee, addresses_used, filename_all)
     
-def helper_time_transactions(df, filename):
+def helper_time_transactions(df, addresses_used, filename):
     '''
-    This function helps the time_transactions function to calculate the difference in time and output the standard deviation of it
+    This function helps the time_transactions function to calculate the difference in time and output the mean and standard deviation of it
 
     Parameters
     ----------
-    df : Dataframe to process
-    filename : Filename for output
+    df : dask.dataframe.core.DataFrame
+        Dataframe to process.
 
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    filename : string
+        Name to output as file        
+        
     Returns
     -------
-    File with time differences per transactions described through standard deviation
+    File with time differences per transactions described through mean and standard deviation
     '''
     #schema = pa.schema([('address', pa.string()), ('level_1', pa.int64()), ('diff', pa.duration('s'))])
     df = df[['address', 'nTime', 'value']]
@@ -486,17 +564,28 @@ def helper_time_transactions(df, filename):
     df = df[['address', 'nTime']]
     df = df.groupby('address')['nTime'].apply(lambda x: x.diff(), meta = ('diff', 'timedelta64[ns]'))
     df = df.reset_index()
-    #file_writer(df, filename, schema = schema)
+    df = df.groupby('address')['diff'].aggregate(['mean', 'std'])
+    df = df.reset_index()
+    df = df[df['address'].isin(addresses_used['address'])]
+    file_writer(df, filename)
 
-def time_transactions(tx_in, tx_out, partition_name):
+def time_transactions(tx_in, tx_out, addresses_used, partition_name):
     '''
     This function calculates the difference in time per transaction per address (Runtime: )
 
     Parameters
     ----------
-    tx_in : Sender transactions
-    tx_out : Receiver transactions
-    partition_name : The height of the blocks for the investigated month
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions
+
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    partition_name : string
+        The height of the blocks for the investigated month
 
     Returns
     -------
@@ -507,11 +596,11 @@ def time_transactions(tx_in, tx_out, partition_name):
     filename_sender = f'transaction_time_diff_sender_{partition_name}'
     filename_receiver = f'transaction_time_diff_receiver_{partition_name}'
     
-    helper_time_transactions(tx_in, filename_sender)
-    helper_time_transactions(tx_out, filename_receiver)
+    helper_time_transactions(tx_in, addresses_used, filename_sender)
+    helper_time_transactions(tx_out, addresses_used, filename_receiver)
 
     df = dd.concat([tx_in[['txid', 'address', 'nTime']], tx_out[['txid', 'address', 'nTime']]], axis = 0)
-    helper_time_transactions(df, filename_all)
+    helper_time_transactions(df, addresses_used, filename_all)
 
 '''
 def std_transaction_value(tx_in, tx_out, partition_name):
@@ -553,7 +642,8 @@ def addresses_per_txid(df):
 
     Parameters
     ----------
-    df : Dataframe to process
+    df : dask.dataframe.core.DataFrame
+        Dataframe to process
 
     Returns
     -------
@@ -563,18 +653,23 @@ def addresses_per_txid(df):
     schema = pa.schema([('index', pa.string()), ('address', pa.list_(pa.string()))])
     df = df.groupby('txid')['address'].apply(list, meta = ('address', 'object'))
     df = df.reset_index()
-    file_writer(df, 'temp_adresses_per_txid', schema = schema, feature = False)
+    file_writer(df, 'temp_adresses_per_txid', schema = schema, feature = False, overwrite = True)
     return dd.read_parquet('temp_adresses_per_txid')
 
-def helper_count_addresses(df, filename):
+def helper_count_addresses(df, addresses_used, filename):
     '''
     This function helps the count_addresses function to determine the count of unique addresses per address in dataframe (Runtime: 30 Minuten)
 
     Parameters
     ----------
-    df : Dataframe to process
-    filename : Filename for output
-
+    df : dask.dataframe.core.DataFrame
+        Dataframe to process
+        
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).    
+        
+    filename : string
+        Filename for output
 
     Returns
     -------
@@ -586,21 +681,28 @@ def helper_count_addresses(df, filename):
     address_per_txid = addresses_per_txid(df)
     
     df = df[['address', 'txid']]
+    df = df[df['address'].isin(addresses_used['address'])]
     df = df.merge(address_per_txid, left_on = 'txid', right_on = 'index', how = 'left')
     df = df.groupby('address_x')['address_y'].apply(list, meta = ('count_unique_addresses', 'object'))
     df = df.apply(lambda x: len(set(list(itertools.chain(*x)))) - 1, meta=('count_unique_addresses', 'object'))
     df = df.reset_index()
-    
     file_writer(df, filename, schema)
 
-def count_addresses(tx_in, tx_out, partition_name):
+def count_addresses(tx_in, tx_out, addresses_used, partition_name):
     '''
     This fuction counts the unique addresses seperated by sender, receiver and all transactions (Runtime: 170 Minuten)
 
     Parameters
     ----------
-    tx_in : Sender transactions
-    tx_out : Receiver transactions
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions
+         
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).    
+       
     partition_name : The height of the blocks for the investigated month
     
     Returns
@@ -612,10 +714,10 @@ def count_addresses(tx_in, tx_out, partition_name):
     filename_sender = f'count_addresses_sender_{partition_name}'
     filename_receiver = f'count_addresses_receiver_{partition_name}'
 
-    helper_count_addresses(tx_in, filename_sender)
-    helper_count_addresses(tx_out, filename_receiver)
+    helper_count_addresses(tx_in, addresses_used, filename_sender)
+    helper_count_addresses(tx_out, addresses_used, filename_receiver)
     df = dd.concat([tx_in[['txid', 'address']], tx_out[['txid', 'address']]], axis = 0)
-    helper_count_addresses(df, filename_all)
+    helper_count_addresses(df, addresses_used, filename_all)
 
 def balance(tx_in, tx_out, partition_name):
     '''
@@ -711,13 +813,18 @@ def count_addresses_per_transaction(tx_in, tx_out, partition_name):
     df.groupby('address')['count_address'].std().reset_index().rename(columns = {'count_address': 'count_address_std'}).to_json(filename_all_std, orient = 'records') 
     '''
 
-def active_darknet_markets(tx_in, tx_out, partition_name):
+def helper_active_darknet_markets(darknet_markets, min_date, max_date):
+    darknet_markets = darknet_markets[darknet_markets['Datum'] >= min_date & darknet_markets['Datum'] <= max_date]
+    return darknet_markets['Anzahl'].mean()
+
+def active_darknet_markets(tx_in, tx_out, darknet_markets, partition_name):
     df = helper_lifetime_address(tx_in, tx_out)
     #df['count_darknet'] = df.groupby('address').apply(lambda x: darknet_markets[(x['nTime_x'] =< darknet_markets['Datum']) and (darknet_markets['Datum'] <= x['nTime_y'])].mean(), meta = ('count_darknet_markets', 'float64'))
     
     df.groupby('address').apply(lambda x: darknet_markets[((darknet_markets['Datum'] >= x['nTime_x']) & (darknet_markets['Datum'] <= x['nTime_y']))]['Anzahl'].mean(), meta = ('count_darknet_markets', 'object'))
     return df.head()               
 
+'''
 def combine_std(x):
     means = x['means']
     lengths = x['lengths']
@@ -725,4 +832,5 @@ def combine_std(x):
     mean_all = np.sum(means * lengths)
     deviance = np.sum((lengths - 1) * stds) + np.sum(lengths * ((means - mean_all)**2))
     sd = 1 / (np.sum(lengths) - 1) * deviance
-    return sd                                            
+    return sd   
+'''                                         

@@ -9,17 +9,12 @@ import dask.dataframe as dd
 import os
 import pandas as pd
 import re
-from datetime import datetime
-from dask.diagnostics import ProgressBar
-import itertools
-import glob
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/githubrepo/'
 os.chdir(path)
 from notifier import notify_telegram_bot
 from create_dataset import file_writer
 import pyarrow as pa
 import numpy as np
-import pandas as pd
 
 # Read paths and list files
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
@@ -135,15 +130,27 @@ def txid_used(tx_out, tx_in, illegal_addresses):
     A file with used txids is generated
 
     '''
-    tx_out = tx_out[['address', 'txid']]
-    tx_in = tx_in[['hashPrevOut', 'txid']]
+    tx_out_prev = tx_out[['txid', 'address']]
+    tx_out = tx_out[['txid', 'address']]
+
     addresses_used = dd.concat([illegal_addresses, dd.read_parquet('sample_legal_addresses')], axis = 0).compute()
     
     tx_out = tx_out[tx_out['address'].isin(addresses_used['address'])]
     tx_out = tx_out[['txid']]
+    tx_out_prev = tx_out_prev[tx_out_prev['address'].isin(addresses_used['address'])]
+    tx_out_prev = tx_out_prev[['txid']]
+    tx_out_append = dd.concat([tx_out, tx_out_prev], axis = 0)
 
-    file_writer(tx_out, 'txid_used', feature = False, overwrite = True)
-
+    file_writer(tx_out_append, 'txid_used', feature = False, overwrite = True)
+    
+    txid_used = dd.read_parquet('txid_used').compute()
+    
+    tx_in = tx_in[['hashPrevOut', 'txid']]
+    tx_in = tx_in[tx_in['hashPrevOut'].isin(txid_used['txid'])]
+    tx_in = tx_in[['txid']]
+    tx_in = dd.concat([tx_in, tx_out], axis = 0)
+    tx_in.to_parquet('txid_used2')
+    
 def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, files_tx_out: list, i: int):
     '''
     Reads in big data files with dask of a file directory with iterator (which entries of file directory should be read - e.g. 0 -> first file of transactions, tx_in, tx_out)
@@ -203,16 +210,20 @@ def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, 
 
     return blocks, transactions, tx_in, tx_out, tx_out_prev
 
-def helper_csv_to_parquet(filename, columnnames: list, usecols: list, schema: pa.lib.Schema):
+def helper_csv_to_parquet(filename: str, columnnames: list, usecols: list, schema: pa.lib.Schema):
     '''
     This function iterates over a list of files and saves it as parquet file
 
     Parameters
     ----------
-    filename : Names of files to read in
-    columnnames : Descripes the column names
-    usecols : A list to decide which columns should be read in
-    schema : a pyarrow schema to write as parquet file
+    filename : string
+        Names of files to read in.
+    columnnames : list
+        Descripes the column names.
+    usecols : list
+        A list to decide which columns should be read in.
+    schema : pa.schema()
+        a pyarrow schema to write as parquet file.
 
     Returns
     -------
@@ -235,13 +246,20 @@ def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_r
 
     Parameters
     ----------
-    tx_in : The sender transactions
-    tx_out : The receiver transactions
-    tx_out_prev : The previous receiver transactions (needed because of data structure (reference to previous transaction that could be outside of the current month))
-    transactions : The transactions as links to blocks
-    blocks : The blocks
-    transactions_reward : The reward transactions to ignore in the new build df
-    filename : The name for the new file
+    tx_in : dask.dataframe.core.DataFrame
+        The sender transactions.
+    tx_out : dask.dataframe.core.DataFrame
+        The receiver transactions.
+    tx_out_prev : dask.dataframe.core.DataFrame
+        The previous receiver transactions (needed because of data structure (reference to previous transaction that could be outside of the current month)).
+    transactions : dask.dataframe.core.DataFrame
+        The transactions as links to blocks.
+    blocks : dask.dataframe.core.DataFrame
+        The blocks
+    transactions_reward : DataFrame
+        The reward transactions to ignore in the new build df.
+    filename : string
+        The name for the new file.
 
     Returns
     -------
@@ -273,11 +291,16 @@ def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
 
     Parameters
     ----------
-    tx_out : The receiver transactions
-    transactions : The transactions as links to blocks
-    blocks : The blocks
-    transactions_reward : The reward transactions to ignore in the new build df
-    filename : The name for the new file
+    tx_out : dask.dataframe.core.DataFrame
+        The receiver transactions.
+    transactions : dask.dataframe.core.DataFrame
+        The transactions as links to blocks.
+    blocks : dask.dataframe.core.DataFrame
+        The blocks.
+    transactions_reward : DataFrame
+        The reward transactions to ignore in the new build df.
+    filename : string
+        The name for the new file.
 
     Returns
     -------
