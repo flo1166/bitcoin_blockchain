@@ -389,62 +389,64 @@ def sum_transaction_value_btc(tx_in, tx_out, addresses_used, partition_name, eur
     df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
     helper_sum_transaction_value(df, addresses_used, filename_all, euro)
 
-def helper_max_min(df, filename, max_boolean):
+def helper_max_min(df, addresses_used, filename):
     '''
-    This function helps the max_min_transaction_value_btc function to determine max / min and save it
+    This function helps the min_max_std_transaction_value_btc function to determine max / min / std and save it
 
     Parameters
     ----------
-    df : Dataframe to process
+    df : dask.dataframe.core.DataFrame
+        Dataframe to process.
+        
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    filename : string
+        Name to output as file.
     
-    filename : Name to output as file
-    
-    max_boolean : if maximum (true) or minium (false) should be calculated
-
     Returns
     -------
-    File with maximum and minimum by all, sender or receiver transactions
+    File with maximum, minimum and std by all, sender or receiver transactions
 
     '''
-    if max_boolean:
-        df = df.groupby('address')['value'].max()
-    else:
-        df = df.groupby('address')['value'].min()
-    
+    df = df[df['address'].isin(addresses_used['address'])]
+    df = df[['address', 'value']]
+    df = df.groupby('address').aggregate({'value': ['min', 'max', 'std']})
     df = df.reset_index()
+    df.columns = df.columns.get_level_values(0) + '_' + df.columns.get_level_values(1)
     file_writer(df, filename)
     
-def max_min_transaction_value_btc(tx_in, tx_out, partition_name, max_boolean = True):
+def min_max_std_transaction_value_btc(tx_in, tx_out, addresses_used, partition_name):
     '''
-    This functions calculates either max nor minimum transaction value of an address (Runtime: 10 Minuten)
+    This functions calculates max, min and std of the transaction value of an address (Runtime: 6 Minuten)
 
     Parameters
     ----------
-    tx_in : Sender transactions
-    
-    tx_out : Receiver transactions
-    
-    partition_name : The height of the blocks for the investigated month
-    
-    max_boolean : if maximum (true) or minium (false) should be calculated
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions.
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions.
+        
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).
+        
+    partition_name : string
+        The height of the blocks for the investigated month.
 
     Returns
     -------
-    Files with maximum and minimum by all, sender or receiver transactions
+    Files with max, min and std of all, sender and receiver transactions
 
     '''
-    text = 'min'
-    if max:
-        text = 'max'
-        
-    filename_all = f'{text}_transaction_value_all_{partition_name}'
-    filename_sender = f'{text}_transaction_value_sender_{partition_name}'
-    filename_receiver = f'{text}_transaction_value_receiver_{partition_name}'
+    filename_all = f'max_min_std_transaction_value_all_{partition_name}'
+    filename_sender = f'max_min_std_transaction_value_sender_{partition_name}'
+    filename_receiver = f'max_min_std_transaction_value_receiver_{partition_name}'
     
-    helper_max_min(tx_in, filename_sender, max_boolean)
-    helper_max_min(tx_out, filename_receiver, max_boolean)
-    df = dd.concat([tx_in[['address', 'value']], tx_out[['address', 'value']]], axis = 0)
-    helper_max_min(df, filename_all, max_boolean)
+    helper_max_min(tx_in, addresses_used, filename_sender)
+    helper_max_min(tx_out, addresses_used, filename_receiver)
+    df = dd.concat([tx_in, tx_out], axis = 0)
+    helper_max_min(df, addresses_used, filename_all)
 
 def helper_transaction_fee(df, df_fee, addresses_used, filename):
     '''
@@ -557,16 +559,15 @@ def helper_time_transactions(df, addresses_used, filename):
     File with time differences per transactions described through mean and standard deviation
     '''
     #schema = pa.schema([('address', pa.string()), ('level_1', pa.int64()), ('diff', pa.duration('s'))])
-    df = df[['address', 'nTime', 'value']]
-    df = df.set_index('nTime')
-    df = df.groupby('address')['value'].apply(lambda x: x.sort_index(), meta = ('value', 'float64'))
-    df = df.reset_index()
+    df = df[df['address'].isin(addresses_used['address'])].reset_index(drop = True)
     df = df[['address', 'nTime']]
-    df = df.groupby('address')['nTime'].apply(lambda x: x.diff(), meta = ('diff', 'timedelta64[ns]'))
+    df = df.groupby('address')['nTime'].apply(lambda x: (x.sort_values().diff()) / pd.Timedelta(minutes=1))
     df = df.reset_index()
-    df = df.groupby('address')['diff'].aggregate(['mean', 'std'])
+    file_writer(df, 'temp_df_time_transactions', feature = False, overwrite = True)
+    df = dd.read_parquet('temp_df_time_transactions')
+    df = df.rename(columns = {'nTime': 'time_between_transactions'})
+    df = df.groupby('address')['time_between_transactions'].aggregate(['mean', 'std'])
     df = df.reset_index()
-    df = df[df['address'].isin(addresses_used['address'])]
     file_writer(df, filename)
 
 def time_transactions(tx_in, tx_out, addresses_used, partition_name):
@@ -599,7 +600,7 @@ def time_transactions(tx_in, tx_out, addresses_used, partition_name):
     helper_time_transactions(tx_in, addresses_used, filename_sender)
     helper_time_transactions(tx_out, addresses_used, filename_receiver)
 
-    df = dd.concat([tx_in[['txid', 'address', 'nTime']], tx_out[['txid', 'address', 'nTime']]], axis = 0)
+    df = dd.concat([tx_in, tx_out], axis = 0)
     helper_time_transactions(df, addresses_used, filename_all)
 
 '''
@@ -719,14 +720,21 @@ def count_addresses(tx_in, tx_out, addresses_used, partition_name):
     df = dd.concat([tx_in[['txid', 'address']], tx_out[['txid', 'address']]], axis = 0)
     helper_count_addresses(df, addresses_used, filename_all)
 
-def balance(tx_in, tx_out, partition_name):
+def balance(tx_in, tx_out, addresses_used, partition_name):
     '''
     This function generates the balance after each transaction (Runtime: 14 Minuten)
 
     Parameters
     ----------
-    tx_in : Sender transactions
-    tx_out : Receiver transactions
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions
+         
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).    
+       
     partition_name : The height of the blocks for the investigated month
 
     Returns
@@ -734,34 +742,62 @@ def balance(tx_in, tx_out, partition_name):
     Files with the mean and standard deviation of the balance
 
     '''
-    '''
-    filename_std = f'std_balance_{partition_name}'
-    filename_mean = f'mean_balance_{partition_name}' 
-    '''
-    filename = f'balance_per_address_after_each_transaction_{partition_name}' 
+    filename = f'mean_and_std_balance_{partition_name}'
     
     tx_in['value'] = tx_in['value'] * (-1)
     
     df = dd.concat([tx_in[['txid', 'address', 'value', 'nTime']], tx_out[['txid', 'address', 'value', 'nTime']]], axis = 0)
+    df = df[df['address'].isin(addresses_used['address'])]
     df = df.groupby(['address', 'txid', 'nTime']).sum()
     df = df.reset_index()
     df = df.sort_values('nTime')
-    df_add = df.rename(columns = {'value': 'balance'})
-    df_add = df_add.groupby('address')['balance'].cumsum()
-    df = dd.concat([df, df_add], axis = 1)
-    df = df[['address', 'balance']]
-    df['balance'] = abs(df['balance'])
+    df['cumsum'] = df.groupby('address')['value'].cumsum()
+    df = df.groupby('address')['cumsum'].aggregate(['mean', 'std'])
     file_writer(df, filename)
-    
-def count_addresses_per_transaction(tx_in, tx_out, partition_name):
+ 
+def helper_count_addresses_per_trans(tx_in, tx_out):
     '''
-    ÜBERARBEITEN...
+    This function writes a file with count of addresses per txid
+
+    Parameters
+    ----------
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions
+
+    Returns
+    -------
+    dask.dataframe.core.DataFrame
+        A file with count of addresses per txid
+
+    '''
+    tx_in = tx_in.groupby('txid')['nTime'].count()
+    tx_in = tx_in.reset_index()
+    tx_out = tx_out.groupby('txid')['nTime'].count()
+    tx_out = tx_out.reset_index()
+    tx_in = tx_in.merge(tx_out, on = 'txid', how = 'outer')
+    tx_in = tx_in.rename(columns = {'nTime_x': 'count_address_sender', 'nTime_y': 'count_address_receiver'})
+    tx_in['count_address'] = tx_in['count_address_sender'] + tx_in['count_address_receiver']
+    file_writer(tx_in, 'temp_df_count_addresses_per_txid', feature = False)
+    return dd.read_parquet('temp_df_count_addresses_per_txid')
+ 
+def count_addresses_per_transaction(tx_in, tx_out, addresses_used, partition_name):
+    '''
     This function calculates the min, max, mean and standard deviation of the count of addresses per transactions (seperated by sender, receiver and all addresses) (Runtime: 3 Minuten)
 
     Parameters
     ----------
-    tx_in : Sender transactions
-    tx_out : Receiver transactions
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions
+         
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).    
+       
     partition_name : The height of the blocks for the investigated month
 
     Returns
@@ -769,68 +805,255 @@ def count_addresses_per_transaction(tx_in, tx_out, partition_name):
     File with the count of addresses sepearated by sender, receiver and all addresses
 
     '''
-    '''
-    filename_sender_mean = f'mean_count_sender_addresses_per_transaction_{partition_name}'
-    filename_receiver_mean = f'mean_count_receiver_addresses_per_transaction_{partition_name}'
-    filename_all_mean = f'mean_count_addresses_per_transaction_{partition_name}'
-    filename_sender_min = f'min_count_sender_addresses_per_transaction_{partition_name}'
-    filename_receiver_min = f'min_count_receiver_addresses_per_transaction_{partition_name}'
-    filename_all_min = f'min_count_addresses_per_transaction_{partition_name}'
-    filename_sender_max = f'max_count_sender_addresses_per_transaction_{partition_name}'
-    filename_receiver_max = f'max_count_receiver_addresses_per_transaction_{partition_name}'
-    filename_all_max = f'max_count_addresses_per_transaction_{partition_name}'
-    filename_sender_std = f'std_count_sender_addresses_per_transaction_{partition_name}'
-    filename_receiver_std = f'std_count_receiver_addresses_per_transaction_{partition_name}'
-    filename_all_std = f'std_addresses_per_transaction_{partition_name}'
-    '''
-    filename = f'count_addresses_per_transaction_{partition_name}'
-    count_transactions = tx_in.groupby('txid')['nTime'].count()
-    count_transactions = count_transactions.reset_index()
-    tx_out = tx_out.groupby('txid')['nTime'].count()
-    tx_out = tx_out.reset_index()
-    count_transactions = count_transactions.merge(tx_out, on = 'txid', how = 'outer')
-    count_transactions = count_transactions.rename(columns = {'nTime_x': 'count_address_sender', 'nTime_y': 'count_address_receiver'})
-    count_transactions['count_address'] = count_transactions['count_address_sender'] + count_transactions['count_address_receiver']
-    file_writer(count_transactions, filename)
+    filename = f'mean_min_max_std_addresses_per_transaction_{partition_name}'
+
+    count_transactions = helper_count_addresses_per_trans(tx_in, tx_out)
     
-    '''
-    df = dd.concat([tx_in[['txid', 'address']], tx_out[['txid', 'address']]], axis = 0)
+    df = dd.concat([tx_in, tx_out], axis = 0)
+    df = df[df['address'].isin(addresses_used['address'])]
+    df = df[['txid', 'address']]
     df = df.merge(count_transactions, on = 'txid', how = 'left')
-    df.groupby('address')['count_address_sender'].mean().reset_index().rename(columns = {'count_address_sender': 'count_address_sender_mean'}).to_json(filename_sender_mean, orient = 'records') 
-    df.groupby('address')['count_address_receiver'].mean().reset_index().rename(columns = {'count_address_receiver': 'count_address_receiver_mean'}).to_json(filename_receiver_mean, orient = 'records') 
-    df.groupby('address')['count_address'].mean().reset_index().rename(columns = {'count_address': 'count_address_mean'}).to_json(filename_all_mean, orient = 'records') 
+    df = df.groupby('address').aggregate({'count_address_sender': ['mean', 'min', 'max', 'std'],
+                                            'count_address_receiver': ['mean', 'min', 'max', 'std'],
+                                            'count_address': ['mean', 'min', 'max', 'std']})
+    df.columns = df.columns.get_level_values(0) + '_' + df.columns.get_level_values(1)
+    file_writer(df, filename)
     
-    df.groupby('address')['count_address_sender'].min().reset_index().rename(columns = {'count_address_sender': 'count_address_sender_min'}).to_json(filename_sender_min, orient = 'records') 
-    df.groupby('address')['count_address_receiver'].min().reset_index().rename(columns = {'count_address_receiver': 'count_address_receiver_min'}).to_json(filename_receiver_min, orient = 'records') 
-    df.groupby('address')['count_address'].min().reset_index().rename(columns = {'count_address': 'count_address_min'}).to_json(filename_all_min, orient = 'records') 
-    
-    df.groupby('address')['count_address_sender'].max().reset_index().rename(columns = {'count_address_sender': 'count_address_sender_max'}).to_json(filename_sender_max, orient = 'records') 
-    df.groupby('address')['count_address_receiver'].max().reset_index().rename(columns = {'count_address_receiver': 'count_address_receiver_max'}).to_json(filename_receiver_max, orient = 'records') 
-    df.groupby('address')['count_address'].max().reset_index().rename(columns = {'count_address': 'count_address_max'}).to_json(filename_all_max, orient = 'records') 
-    
-    df.groupby('address')['count_address_sender'].std().reset_index().rename(columns = {'count_address_sender': 'count_address_sender_std'}).to_json(filename_sender_std, orient = 'records') 
-    df.groupby('address')['count_address_receiver'].std().reset_index().rename(columns = {'count_address_receiver': 'count_address_receiver_std'}).to_json(filename_receiver_std, orient = 'records') 
-    df.groupby('address')['count_address'].std().reset_index().rename(columns = {'count_address': 'count_address_std'}).to_json(filename_all_std, orient = 'records') 
+def helper_active_darknet_markets(darknet_markets, row):
     '''
+    Helper for active_darknet_markets to calculate the mean active darknet markets for 2020
 
-def helper_active_darknet_markets(darknet_markets, min_date, max_date):
-    darknet_markets = darknet_markets[darknet_markets['Datum'] >= min_date & darknet_markets['Datum'] <= max_date]
-    return darknet_markets['Anzahl'].mean()
+    Parameters
+    ----------
+    darknet_markets : DataFrame
+        A file with the count of DarkNet markets to a specific month. 
+        
+    min_date : datetime64[ns]
+        The minimal date a address has
+        
+    max_date : datetime64[ns]
+        The maximum date a address has
 
-def active_darknet_markets(tx_in, tx_out, darknet_markets, partition_name):
-    df = helper_lifetime_address(tx_in, tx_out)
-    #df['count_darknet'] = df.groupby('address').apply(lambda x: darknet_markets[(x['nTime_x'] =< darknet_markets['Datum']) and (darknet_markets['Datum'] <= x['nTime_y'])].mean(), meta = ('count_darknet_markets', 'float64'))
+    Returns
+    -------
+    The mean count of active darknet markets during lifetime of an address
+
+    '''
+    darknet_markets = darknet_markets[(darknet_markets['Datum'] >= row['min']) & (darknet_markets['Datum'] <= row['max'])]
+    return round(darknet_markets['Anzahl'].mean(), 1)
+
+def active_darknet_markets(tx_in, tx_out, darknet_markets, addresses_used, partition_name):
+    '''
+    This function calculates how many darknet markets where active
+
+    Parameters
+    ----------
+    tx_in : dask.dataframe.core.DataFrame
+        Sender transactions
+        
+    tx_out : dask.dataframe.core.DataFrame
+        Receiver transactions
+        
+    darknet_markets : DataFrame
+        A file with the count of DarkNet markets to a specific month. 
+        
+    addresses_used : DataFrame
+        With addresses used in this research (not neceassary to save all computing).    
+       
+    partition_name : The height of the blocks for the investigated month
+
+    Returns
+    -------
+    File with the mean active darknet markets of an address (during lifetime) for 2020
+
+    '''
+    filename = f'darknet_markets_{partition_name}'
     
-    df.groupby('address').apply(lambda x: darknet_markets[((darknet_markets['Datum'] >= x['nTime_x']) & (darknet_markets['Datum'] <= x['nTime_y']))]['Anzahl'].mean(), meta = ('count_darknet_markets', 'object'))
-    return df.head()               
+    df = dd.concat([tx_in[['address', 'nTime']], tx_out[['address', 'nTime']]], axis = 0)
+    df = df[df['address'].isin(addresses_used['address'])]
+    
+    df = df.groupby('address')['nTime'].aggregate(['max', 'min'])
+    df['max'] = df['max'].dt.ceil(freq = 'D')
+    df['min'] = df['min'].dt.floor(freq = 'D')
+    df = df.apply(lambda x: helper_active_darknet_markets(darknet_markets, x), meta = ('darknet_markets', 'float64'), axis = 1)
+    df = df.reset_index()
+    df = df[['address', 'darknet_markets']]
+    
+    file_writer(df, filename)                                     
+    
+def address_concentration(count_address, count_transactions):
+    '''
+    This function calculates the concentration of an address
 
-'''
-def combine_std(x):
-    means = x['means']
-    lengths = x['lengths']
-    stds = x['stds']
-    mean_all = np.sum(means * lengths)
-    deviance = np.sum((lengths - 1) * stds) + np.sum(lengths * ((means - mean_all)**2))
-    sd = 1 / (np.sum(lengths) - 1) * deviance
-    return sd   
-'''                                         
+    Parameters
+    ----------
+    count_address : Series
+        count of all addresses which an address trades.
+        
+    count_transactions : Series
+        count of all transactions of an address.
+
+    Returns
+    -------
+    float
+        The concentration of an address to other addresses.
+
+    '''
+    if count_transactions <= 1:
+        return 1
+    else:
+        return ((count_address / count_transactions) - (1 / count_transactions)) / (1 - (1 / count_transactions))
+
+illegal_addresses = dd.read_parquet('illegal_addresses')['address'].compute()
+
+def build_final_data_set(illegal_addresses):
+    '''
+    This function generates the final data set
+
+    Parameters
+    ----------
+    illegal_addresses : Series
+        All illegal addresses for this research.
+        
+    Returns
+    -------
+    File with all features
+
+    '''
+    count_address = dd.read_parquet('features/count_addresses_all_610682-663904')
+    count_address = count_address.rename(columns = {'count_unique_addresses': 'count_addresses'})
+    count_address_sender = dd.read_parquet('features/count_addresses_sender_610682-663904')
+    count_address_sender = count_address_sender.rename(columns = {'count_unique_addresses': 'count_addresses_sender'})
+    count_address_receiver = dd.read_parquet('features/count_addresses_receiver_610682-663904')
+    count_address_receiver = count_address_receiver.rename(columns = {'count_unique_addresses': 'count_addresses_receiver'})
+    
+    df = count_address.merge(count_address_sender, on = 'index', how = 'outer')
+    df = df.merge(count_address_sender, on = 'index', how = 'outer')
+    df = df.merge(count_address_receiver, on = 'index', how = 'outer')
+    df = df.rename(columns = {'index': 'address'})
+    
+    count_transactions = dd.read_parquet('features/count_transactions_610682-663904')
+    count_transactions_sender = dd.read_parquet('features/count_sender_transactions_610682-663904')
+    count_transactions_sender = count_transactions_sender.rename(columns = {'count_transactions': 'count_transactions_sender'})
+    count_transactions_receiver = dd.read_parquet('features/count_receiver_transactions_610682-663904')
+    count_transactions_receiver = count_transactions_receiver.rename(columns = {'count_transactions': 'count_transactions_receiver'})
+    count_transactions_equal = dd.read_parquet('features/count_receiver_eqal_sender_transactions_610682-663904')
+    count_transactions_equal = count_transactions_equal.rename(columns = {'count_receiver_equal_sender_transactions': 'count_transactions_s_equal_r'})
+    
+    df = df.merge(count_transactions, on = 'address', how = 'outer')
+    df = df.merge(count_transactions_sender, on = 'address', how = 'outer')
+    df = df.merge(count_transactions_receiver, on = 'address', how = 'outer')
+    df = df.merge(count_transactions_equal, on = 'address', how = 'outer')
+    
+    darknet_markets = dd.read_parquet('features/darknet_markets_610682-663904')
+    
+    df = df.merge(darknet_markets, on = 'address', how = 'outer')
+    
+    lifetime = dd.read_parquet('features/lifetime_address_610682-663904')
+    
+    df = df.merge(lifetime, on = 'address', how = 'outer')
+    
+    transaction_value = dd.read_parquet('features/max_min_std_transaction_value_all_610682-663904')
+    transaction_value = transaction_value.rename(columns = {'address_': 'address', 
+                                                            'value_min': 'min_transaction_value', 
+                                                            'value_max': 'max_transaction_value',
+                                                            'value_std': 'std_transaction_value'})
+    transaction_value_sender = dd.read_parquet('features/max_min_std_transaction_value_sender_610682-663904')
+    transaction_value_sender = transaction_value_sender.rename(columns = {'address_': 'address',
+                                                                          'value_min': 'min_transaction_value_sender',
+                                                                          'value_max': 'max_transaction_value_sender',
+                                                                          'value_std': 'std_transaction_value_sender'})
+    transaction_value_receiver = dd.read_parquet('features/max_min_std_transaction_value_receiver_610682-663904')
+    transaction_value_receiver = transaction_value_receiver.rename(columns = {'address_': 'address',
+                                                                              'value_min': 'min_transaction_value_receiver',
+                                                                              'value_max': 'max_transaction_value_receiver',
+                                                                              'value_std': 'std_transaction_value_receiver'})
+    
+    df = df.merge(transaction_value, on = 'address', how = 'outer')
+    df = df.merge(transaction_value_sender, on = 'address', how = 'outer')
+    df = df.merge(transaction_value_receiver, on = 'address', how = 'outer')
+    
+    balance = dd.read_parquet('features/mean_and_std_balance_610682-663904')
+    balance = balance.reset_index()
+    balance = balance.rename(columns = {'mean': 'mean_balance', 'std': 'std_balance'})
+    df = df.merge(balance, on = 'address', how = 'outer')
+    
+    addresses_per_transaction = dd.read_parquet('features/mean_min_max_std_addresses_per_transaction_610682-663904')
+    addresses_per_transaction = addresses_per_transaction.reset_index()
+    addresses_per_transaction = addresses_per_transaction.rename(columns = {'count_address_sender_mean': 'mean_addresses_per_transaction_sender',
+                                                                            'count_address_sender_min': 'min_addresses_per_transaction_sender',
+                                                                            'count_address_sender_max': 'max_addresses_per_transaction_sender',
+                                                                            'count_address_sender_std': 'std_addresses_per_transaction_sender',
+                                                                            'count_address_receiver_mean': 'mean_addresses_per_transaction_receiver',
+                                                                            'count_address_receiver_min': 'min_addresses_per_transaction_receiver',
+                                                                            'count_address_receiver_max': 'max_addresses_perr_transaction_receiver',
+                                                                            'count_address_receiver_std': 'std_addresses_per_transaction_receiver',
+                                                                            'count_address_mean': 'mean_addresses_per_transaction',
+                                                                            'count_address_min': 'min_addresses_per_transaction',
+                                                                            'count_address_max': 'max_addresses_per_transaction',
+                                                                            'count_address_std': 'std_addresses_per_transaction'})
+    df = df.merge(addresses_per_transaction, on = 'address', how = 'outer')
+    
+    transaction_volume = dd.read_parquet('features/sum_transaction_value_all_610682-663904')
+    transaction_volume = transaction_volume.rename(columns = {'sum_trans_value_btc': 'transaction_volume_btc'})
+    transaction_volume_sender = dd.read_parquet('features/sum_transaction_value_sender_610682-663904')
+    transaction_volume_sender = transaction_volume_sender.rename(columns = {'sum_trans_value_btc': 'transaction_volume_sender_btc'})
+    transaction_volume_receiver = dd.read_parquet('features/sum_transaction_value_receiver_610682-663904')
+    transaction_volume_receiver = transaction_volume_receiver.rename(columns = {'sum_trans_value_btc': 'transaction_volume_receiver_btc'})
+    transaction_volume_euro = dd.read_parquet('features/sum_transaction_value_all_euro_610682-663904')
+    transaction_volume_euro = transaction_volume_euro.rename(columns = {'sum_trans_value_euro': 'transaction_volume_euro'})
+    transaction_volume_sender_euro = dd.read_parquet('features/sum_transaction_value_sender_euro_610682-663904')
+    transaction_volume_sender_euro = transaction_volume_sender_euro.rename(columns = {'sum_trans_value_euro': 'transaction_volume_sender_euro'})
+    transaction_volume_receiver_euro = dd.read_parquet('features/sum_transaction_value_receiver_euro_610682-663904')
+    transaction_volume_receiver_euro = transaction_volume_receiver_euro.rename(columns = {'sum_trans_value_euro': 'transaction_volume_receiver_euro'})
+    df = df.merge(transaction_volume, on = 'address', how = 'outer')
+    df = df.merge(transaction_volume_sender, on = 'address', how = 'outer')
+    df = df.merge(transaction_volume_receiver, on = 'address', how = 'outer')
+    df = df.merge(transaction_volume_euro, on = 'address', how = 'outer')
+    df = df.merge(transaction_volume_sender_euro, on = 'address', how = 'outer')
+    df = df.merge(transaction_volume_receiver_euro, on = 'address', how = 'outer')
+    
+    transaction_fees = dd.read_parquet('features/transaction_fee_610682-663904')
+    transaction_fees = transaction_fees.rename(columns = {'fee': 'transaction_fee'})
+    transaction_fees_sender = dd.read_parquet('features/transaction_fee_sender_610682-663904')
+    transaction_fees_sender = transaction_fees_sender.rename(columns = {'fee': 'transaction_fee_sender'})
+    transactions_fees_receiver = dd.read_parquet('features/transaction_fee_receiver_610682-663904')
+    transactions_fees_receiver = transactions_fees_receiver.rename(columns = {'fee': 'transaction_fee_receiver'})
+    df = df.merge(transaction_fees, on = 'address', how = 'outer')
+    df = df.merge(transaction_fees_sender, on = 'address', how = 'outer')
+    df = df.merge(transactions_fees_receiver, on = 'address', how = 'outer')
+    
+    transaction_time_diff = dd.read_parquet('features/transaction_time_diff_610682-663904')
+    transaction_time_diff = transaction_time_diff.rename(columns = {'mean': 'mean_time_diff_transaction',
+                                                                    'std': 'std_time_diff_transaction'})
+    transaction_time_diff_sender = dd.read_parquet('features/transaction_time_diff_sender_610682-663904')
+    transaction_time_diff_sender = transaction_time_diff_sender.rename(columns = {'mean': 'mean_time_diff_transaction_sender',
+                                                                    'std': 'std_time_diff_transaction_sender'})
+    transaction_time_diff_receiver = dd.read_parquet('features/transaction_time_diff_receiver_610682-663904')
+    transaction_time_diff_receiver = transaction_time_diff_receiver.rename(columns = {'mean': 'mean_time_diff_transaction_receiver',
+                                                                    'std': 'std_time_diff_transaction_receiver'})
+    df = df.merge(transaction_time_diff, on = 'address', how = 'outer')
+    df = df.merge(transaction_time_diff_sender, on = 'address', how = 'outer')
+    df = df.merge(transaction_time_diff_receiver, on = 'address', how = 'outer')
+    
+    # Features calculated on the basis of other features
+    df['mean_transactions'] = df['count_transactions'] / df['lifetime']
+    df['mean_transactions_sender'] = df['count_transactions_sender'] / df['lifetime']
+    df['mean_transactions_receiver'] = df['count_transactions_receiver'] / df['lifetime']
+    df['mean_transactions_s_equal_r'] = df['count_transactions_s_equal_r'] / df['lifetime']
+    df['mean_transactions_fee'] = df['transaction_fee'] / df['count_transactions']
+    df['mean_transactions_fee_sender'] = df['transaction_fee_sender'] / df['count_transactions_sender']
+    df['mean_transactions_fee_receiver'] = df['transaction_fee_receiver'] / df['count_transactions_receiver']
+    df['mean_transactions_volume'] = df['transaction_volume_btc'] / df['count_transactions']
+    df['mean_transactions_volume_sender'] = df['transaction_volume_sender_btc'] / df['count_transactions_sender']
+    df['mean_transactions_volume_receiver'] = df['transaction_volume_receiver_btc'] / df['count_transactions_receiver']
+    df['concentration_addresses'] = df.apply(lambda x: address_concentration(x['count_addresses'], x['count_transactions']), axis = 1, meta = ('concentration_addresses', 'float64'))
+    df['concentration_addresses_sender'] = df.apply(lambda x: address_concentration(x['count_addresses_sender'], x['count_transactions_sender']), axis = 1, meta = ('concentration_addresses_sender', 'float64'))
+    df['concentration_addresses_receiver'] = df.apply(lambda x: address_concentration(x['count_addresses_receiver'], x['count_transactions_receiver']), axis = 1, meta = ('concentration_addresses_receiver', 'float64'))
+    
+    # Target variable
+    df['illicit'] = 0 
+    df['illicit'] = df['illicit'].where(df['address'].isin(illegal_addresses), 1)
+    file_writer(df, 'final_data_set', feature = False)
+    
+    
