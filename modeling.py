@@ -13,50 +13,32 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
-
+from sklearn.compose import make_column_transformer
 from sklearn.pipeline import Pipeline, make_pipeline
-from sklearn.preprocessing import StandardScaler, OrdinalEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.feature_selection import SequentialFeatureSelector
 from sklearn.model_selection import train_test_split, KFold, cross_validate, GridSearchCV
 
 import dask.dataframe as dd
+import os
 
-def build_ml_dataset(filename):
-    '''
-    Gernerates a ML dataset, depending on classes
+# Read Data
+path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
+os.chdir(path)
+df = dd.read_parquet('final_data_set')
+df_illicit = df[df['illicit'] == 1]
+df_licit = df[df['illicit'] == 0]
 
-    Parameters
-    ----------
-    filename : string
-        the dataframe with all data entries
+# Upsample
+df_illicit = df_illicit.resample(n_samples = 52828, replace = True, random_state = 190)
+df_ml = dd.concat([df_licit, df_illicit], axis = 0)
 
-    Returns
-    -------
-    df : DataFrame
-        a sampled df to learn a ML model on it
-
-    '''
-    df = dd.read_parquet(filename)
-    
-    df_illicit = df[df[''] == 'illicit']
-    df_illicit = df_illicit.sample(frac = 0.05, 
-                                   replace=False, 
-                                   random_state=190)
-    
-    df_elicit = df[df[''] != 'illicit']
-    df_elicit = df_elicit.sample(frac = 0.05, 
-                                   replace=False, 
-                                   random_state=190)
-
-    df = dd.concat([df_illicit, df_elicit], axis = 0).compute()
-    return df
-
-df = build_ml_dataset(filename).compute()
-
-X_train, X_test, y_train, y_test = train_test_split(df, 
+# Split in train and test data
+X_train, X_test, y_train, y_test = train_test_split(df_ml.iloc[:, :-1], 
+                                                    df_ml['illicit'],
                                                     train_size = 0.7, 
                                                     random_state = 190, 
-                                                    stratify = df[''], 
+                                                    stratify = df['illicit'], 
                                                     shuffle=True)
 
 num_attribs =

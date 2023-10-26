@@ -657,14 +657,17 @@ def addresses_per_txid(df):
     file_writer(df, 'temp_adresses_per_txid', schema = schema, feature = False, overwrite = True)
     return dd.read_parquet('temp_adresses_per_txid')
 
-def helper_count_addresses(df, addresses_used, filename):
+def helper_count_addresses(df, df2, addresses_used, filename):
     '''
     This function helps the count_addresses function to determine the count of unique addresses per address in dataframe (Runtime: 30 Minuten)
 
     Parameters
     ----------
     df : dask.dataframe.core.DataFrame
-        Dataframe to process
+        Dataframe to calculate the addresses per txid
+    
+    df2 : dask.dataframe.core.DataFrame
+        All transactions where address is
         
     addresses_used : DataFrame
         With addresses used in this research (not neceassary to save all computing).    
@@ -681,11 +684,11 @@ def helper_count_addresses(df, addresses_used, filename):
     
     address_per_txid = addresses_per_txid(df)
     
-    df = df[['address', 'txid']]
     df = df[df['address'].isin(addresses_used['address'])]
+    df = df[['address', 'txid']]
     df = df.merge(address_per_txid, left_on = 'txid', right_on = 'index', how = 'left')
     df = df.groupby('address_x')['address_y'].apply(list, meta = ('count_unique_addresses', 'object'))
-    df = df.apply(lambda x: len(set(list(itertools.chain(*x)))) - 1, meta=('count_unique_addresses', 'object'))
+    df = df.apply(lambda x: len(set(list(itertools.chain(*x)))), meta=('count_unique_addresses', 'object'))
     df = df.reset_index()
     file_writer(df, filename, schema)
 
@@ -714,11 +717,11 @@ def count_addresses(tx_in, tx_out, addresses_used, partition_name):
     filename_all = f'count_addresses_all_{partition_name}'
     filename_sender = f'count_addresses_sender_{partition_name}'
     filename_receiver = f'count_addresses_receiver_{partition_name}'
-
-    helper_count_addresses(tx_in, addresses_used, filename_sender)
-    helper_count_addresses(tx_out, addresses_used, filename_receiver)
+    
     df = dd.concat([tx_in[['txid', 'address']], tx_out[['txid', 'address']]], axis = 0)
-    helper_count_addresses(df, addresses_used, filename_all)
+    helper_count_addresses(tx_in, df, addresses_used, filename_sender)
+    helper_count_addresses(tx_out, df, addresses_used, filename_receiver)
+    helper_count_addresses(df, df, addresses_used, filename_all)
 
 def balance(tx_in, tx_out, addresses_used, partition_name):
     '''
@@ -902,7 +905,7 @@ def address_concentration(count_address, count_transactions):
     if count_transactions <= 1:
         return 1
     else:
-        return ((count_address / count_transactions) - (1 / count_transactions)) / (1 - (1 / count_transactions))
+        return 1 - (((count_address / count_transactions) - (1 / count_transactions)) / (1 - (1 / count_transactions)))
 
 illegal_addresses = dd.read_parquet('illegal_addresses')['address'].compute()
 
@@ -928,7 +931,6 @@ def build_final_data_set(illegal_addresses):
     count_address_receiver = count_address_receiver.rename(columns = {'count_unique_addresses': 'count_addresses_receiver'})
     
     df = count_address.merge(count_address_sender, on = 'index', how = 'outer')
-    df = df.merge(count_address_sender, on = 'index', how = 'outer')
     df = df.merge(count_address_receiver, on = 'index', how = 'outer')
     df = df.rename(columns = {'index': 'address'})
     
@@ -1052,8 +1054,8 @@ def build_final_data_set(illegal_addresses):
     df['concentration_addresses_receiver'] = df.apply(lambda x: address_concentration(x['count_addresses_receiver'], x['count_transactions_receiver']), axis = 1, meta = ('concentration_addresses_receiver', 'float64'))
     
     # Target variable
-    df['illicit'] = 0 
-    df['illicit'] = df['illicit'].where(df['address'].isin(illegal_addresses), 1)
-    file_writer(df, 'final_data_set', feature = False)
+    df['illicit'] = 1 
+    df['illicit'] = df['illicit'].where(df['address'].isin(illegal_addresses), 0)
+    file_writer(df, 'final_data_set', feature = False, overwrite = True)
     
     
