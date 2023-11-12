@@ -29,7 +29,7 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator 
-import dask.DataFrame as dd
+import dask.dataframe as dd
 
 # Read Data
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
@@ -83,12 +83,10 @@ df_encoded_upsample = preprocessing.fit_transform(df_ml)
 kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=190)
 
 # model pipelines
-pipe_DT = make_pipeline(preprocessing,
-                        DecisionTreeClassifier())
-pipe_gNB = make_pipeline(preprocessing,
-                        GaussianNB())
+pipe_DT = make_pipeline(DecisionTreeClassifier()) # no standardization because tree building
+pipe_gNB = make_pipeline(GaussianNB()) # no standardization because a probability is learned that when a variable is in a certain distribution, than it is assigned to a class - standardization changes the standard deviation and mean, but not the probability for the class
 pipe_LR = make_pipeline(preprocessing,
-                        LogisticRegression(verbose = 3))
+                        LogisticRegression()) # standardization needed because of lasso ridge regression (big coefficients -> strong punishment)
 # pipe_SVC = make_pipeline(preprocessing,
 #                          sfs(estimator = SVC(), 
 #                              k_features = 'best', 
@@ -98,17 +96,13 @@ pipe_LR = make_pipeline(preprocessing,
 #                              cv = kfold),
 #                          SVC(verbose = 3))
 pipe_kNN = make_pipeline(preprocessing,
-                        KNeighborsClassifier())
+                        KNeighborsClassifier()) # standardization needed because of distance metrics (need to compare features and distances)
 # pipe_kM = make_pipeline(preprocessing,
 #                         KMeans(verbose = 3))
-pipe_RF = make_pipeline(preprocessing,
-                        RandomForestClassifier(verbose = 3))
-pipe_AB = make_pipeline(preprocessing,
-                        AdaBoostClassifier())
-pipe_GB = make_pipeline(preprocessing,
-                        GradientBoostingClassifier(verbose = 3))
-pipe_XGB = make_pipeline(preprocessing,
-                        xgb.XGBClassifier(verbose = 3))
+pipe_RF = make_pipeline(RandomForestClassifier()) # no standardization because tree building
+pipe_AB = make_pipeline(AdaBoostClassifier()) # no standardization because tree building
+pipe_GB = make_pipeline(GradientBoostingClassifier())  # no standardization because tree building
+pipe_XGB = make_pipeline(xgb.XGBClassifier())  # no standardization because tree building
 
 def scores(X_train, y_train, kfold, pipeline_list):
     '''
@@ -217,13 +211,11 @@ notify_telegram_bot(f'Finished shortlisting at {datetime.datetime.now().strftime
 
 # Finetuning
 
-def show_gridsearch_finetuning(estimator, params, kfold, preprocessing, X_train, y_train, sequentail_feature_selector = False):
-    estimator1 = estimator
-    estimator2 = estimator
+def gridsearch_finetuning(estimator, params, kfold, pipe, preprocessing, X_train, y_train, sequentail_feature_selector = False):
     
     if sequentail_feature_selector:
         sfs_grid = sfs(
-            estimator = estimator1,
+            estimator = estimator,
             k_features = 'best',
             forward = 'True',
             verbose = 1,
@@ -233,58 +225,64 @@ def show_gridsearch_finetuning(estimator, params, kfold, preprocessing, X_train,
             )
         
         sfs_grid = sfs_grid.fit(X_train, y_train)
-        
-        
+            
         preprocessing = make_column_transformer((num_pipeline, list(sfs_grid.k_feature_names_)),
                                                 remainder = 'drop',
                                                 verbose_feature_names_out = False)
         
-    pipe_gridsearch = Pipeline([('preprocess', preprocessing),
-                                ('model2', estimator2)])
-    
-    dt_grid_search = GridSearchCV(estimator = pipe_gridsearch,
+        pipe = make_pipeline(preprocessing, estimator)
+        
+    dt_grid_search = GridSearchCV(estimator = pipe,
                                 param_grid = params,
-                                refit = 'f1',
+                                refit = 'recall',
                                 scoring = ['roc_auc', 'f1', 'precision', 'recall'],
                                 cv = kfold,
-                                verbose = 2,
+                                verbose = 3,
                                 return_train_score = True,
                                 n_jobs = -1)
-    
     
     dt_grid_search = dt_grid_search.fit(X_train, y_train)
     
     dt_cv_grid_search_results = pd.DataFrame(dt_grid_search.cv_results_)
-    dt_cv_grid_search_results = dt_cv_grid_search_results.sort_values('rank_test_f1')
-    dt_cv_grid_search_results = dt_cv_grid_search_results.iloc[:, dt_cv_grid_search_results.columns.str.contains('mean_test') 
-                                   + dt_cv_grid_search_results.columns.str.contains('rank_test_f1') 
-                                   + dt_cv_grid_search_results.columns.str.contains('param')]
-    
+
     modelname = str(dt_grid_search.estimator[-1]).replace('()','')
     if sequentail_feature_selector:
-        pd.DataFrame(sfs_grid.subsets_).T.to_excel(f'plots/finetuning/finetuning_{modelname}_sequential_feature_selector_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
-    dt_cv_grid_search_results.to_excel(f'plots/finetuning/finetuning_{modelname}_parameters_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
+        pd.DataFrame(sfs_grid.subsets_).T.to_excel(f'plots/finetuning/{modelname}_sequential_feature_selector_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
+    dt_cv_grid_search_results.to_excel(f'plots/finetuning/{modelname}_parameters_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
     
 # Hyperparameters
 ## decision tree
 dt_params = {
-    'max_depth': [3,5,7,9,12,15,18,21],
+    'decisiontreeclassifier__max_depth': [3,5,7,9,12,15,18,21],
     #'min_samples_split': [10,30,50], # The minimum number of samples required to split an internal node
     #'min_samples_leaf': [10,30,50], # The minimum number of samples required to be at a leaf node. 
-    'max_features': [15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
+    'decisiontreeclassifier__max_features': [15,18,21,24,27,30,33,36,39,42,45,48,51,54,57,60],
     #'max_leaf_nodes': [10,30,50],
     #'min_impurity_decrease': [0,-0.1,-0.3],
-    'random_state': [190]
+    'decisiontreeclassifier__random_state': [190]
     }
 
-show_gridsearch_finetuning(DecisionTreeClassifier(), dt_params, kfold, preprocessing, X_train, y_train)
+gridsearch_finetuning(DecisionTreeClassifier(), 
+                      dt_params, 
+                      kfold, 
+                      pipe_DT, 
+                      preprocessing, 
+                      X_train, 
+                      y_train)
 
-## gausian naiva bayes
+## gausian naive bayes
 gnb_params = {
-    'var_smoothing': np.logspace(0,-9, num=100)
+    'gaussiannb__var_smoothing': np.logspace(0,-9, num=100)
     }
 
-show_gridsearch_finetuning(GaussianNB(), gnb_params, kfold, preprocessing.fit_transform(X_train), y_train)
+gridsearch_finetuning(GaussianNB(), 
+                      gnb_params, 
+                      kfold, 
+                      pipe_gNB, 
+                      preprocessing, 
+                      X_train, 
+                      y_train, 
+                      True)
 
 ## logistic regression
 lr_params = {
@@ -295,7 +293,14 @@ lr_params = {
     'model2__random_state': [190]
     }
 
-show_gridsearch_finetuning(LogisticRegression(max_iter = 500), lr_params, kfold, preprocessing ,X_train, y_train, True)
+gridsearch_finetuning(LogisticRegression(max_iter = 1000), 
+                      lr_params, 
+                      kfold, 
+                      pipe_LR, 
+                      preprocessing, 
+                      X_train, 
+                      y_train, 
+                      True)
 
 ## Support Vector Machine
 # svc_params = {
@@ -310,7 +315,14 @@ knn_params = {
     'model2__weights': ['uniform', 'distance']
 }
 
-show_gridsearch_finetuning(KNeighborsClassifier(), knn_params, kfold, preprocessing, X_train, y_train, True)
+gridsearch_finetuning(KNeighborsClassifier(), 
+                      knn_params, 
+                      kfold, 
+                      pipe_kNN, 
+                      preprocessing, 
+                      X_train, 
+                      y_train, 
+                      True)
 
 ## k-Means
 # km_params = {
@@ -321,17 +333,23 @@ show_gridsearch_finetuning(KNeighborsClassifier(), knn_params, kfold, preprocess
 
 ## random forest
 rf_params = {
-    'model2__n_estimators': np.arange(100,600,200),
-    'model2__max_depth': np.arange(3,10,3),
+    'randomforestclassifier__n_estimators': np.arange(100,600,200),
+    'randomforestclassifier__max_depth': np.arange(3,10,3),
     #'model2__min_samples_split': np.arange(10,50,10), # The minimum number of samples required to split an internal node
     #'model2__min_samples_leaf': np.arange(10,50,10), # The minimum number of samples required to be at a leaf node. 
-    'model2__max_features': np.arange(9,50,3),
+    'randomforestclassifier__max_features': np.arange(9,50,3),
     #'model2__max_leaf_nodes': np.arange(10,50,10),
     #'model2__min_impurity_decrease': np.arange(0,5,1),
-    'model2__random_state': [190]
+    'randomforestclassifier__random_state': [190]
 }
 
-show_gridsearch_finetuning(RandomForestClassifier(), rf_params, kfold, preprocessing, X_train, y_train)
+gridsearch_finetuning(RandomForestClassifier(), 
+                      rf_params, 
+                      kfold, 
+                      pipe_RF, 
+                      preprocessing, 
+                      X_train, 
+                      y_train)
 
 ## ada boost
 ab_params = {
@@ -340,7 +358,13 @@ ab_params = {
     'model2__random_state': [190]
 }
 
-show_gridsearch_finetuning(AdaBoostClassifier(), ab_params, kfold, preprocessing, X_train, y_train)
+gridsearch_finetuning(AdaBoostClassifier(), 
+                      ab_params, 
+                      kfold, 
+                      pipe_AB, 
+                      preprocessing, 
+                      X_train, 
+                      y_train)
 
 ## gradient boost
 gb_params = {
@@ -355,24 +379,57 @@ gb_params = {
     'model2__random_state': [190]
 }
 
-show_gridsearch_finetuning(GradientBoostingClassifier(), gb_params, kfold, preprocessing, X_train, y_train)
+gridsearch_finetuning(GradientBoostingClassifier(), 
+                      gb_params, 
+                      kfold, 
+                      pipe_GB, 
+                      preprocessing, 
+                      X_train, 
+                      y_train)
 
 ## xgboost
 xgb_params = {
-    'model2__eta': np.arange(0,1,0.2),
-    'model2__gamma': [0.0, 0.3, 0.6, 1, 5],
+    'model2__eta': np.arange(0.1,1.1,0.3),
+    'model2__gamma': [0.3, 0.6, 1],
     'model2__max_depth': np.arange(3,12,4),
-    'model2__lambda': [0.0, 0.3, 0.6, 1, 5],
-    'model2__alpha': [0.0, 0.3, 0.6, 1, 5],
+    'model2__lambda': [0.3, 0.6, 1],
+    'model2__alpha': [0.3, 0.6, 1],
     #'model2__max_leaves': np.arange(10,50,10)
 }
 
-show_gridsearch_finetuning(xgb.XGBClassifier(), xgb_params, kfold, preprocessing, X_train, y_train)
+gridsearch_finetuning(xgb.XGBClassifier(), 
+                      xgb_params, 
+                      kfold, 
+                      pipe_XGB, 
+                      preprocessing, 
+                      X_train, 
+                      y_train)
 
 # Build the stacked model
 #StackingClassifier(estimators, final_estimator)
 
-
+def gridsearch_stacking_model():
+    
+    estimators = [[('lr'), ]]
+    
+    
+    estimator = StackingClassifier(estimators, LogisticRegression())
+    estimator2 = StackingClassifier(estimators, RandomForest())
+    
+    pipe_gridsearch = Pipeline([('preprocess', preprocessing),
+                                ('model', estimator)])
+    
+    dt_grid_search = GridSearchCV(estimator = pipe_gridsearch,
+                                param_grid = params,
+                                refit = 'f1',
+                                scoring = ['roc_auc', 'f1', 'precision', 'recall'],
+                                cv = kfold,
+                                verbose = 2,
+                                return_train_score = True,
+                                n_jobs = -1)
+    
+    
+    dt_grid_search = dt_grid_search.fit(X_train, y_train)
 
 
 
