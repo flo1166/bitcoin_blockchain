@@ -4,6 +4,9 @@ Created on Fri Oct 13 10:33:56 2023
 
 @author: Florian Korn
 """
+from sklearnex import patch_sklearn
+patch_sklearn()
+
 import xgboost as xgb
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, StackingClassifier
 from sklearn.neighbors import KNeighborsClassifier
@@ -30,6 +33,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator 
 import dask.dataframe as dd
+import itertools
 
 # Read Data
 path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
@@ -212,7 +216,40 @@ notify_telegram_bot(f'Finished shortlisting at {datetime.datetime.now().strftime
 # Finetuning
 
 def gridsearch_finetuning(estimator, params, kfold, pipe, preprocessing, X_train, y_train, sequentail_feature_selector = False):
-    
+    '''
+    This function is able to do sequential feature selection and grid search CV to finetune models.
+
+    Parameters
+    ----------
+    estimator : Function
+        Is the estimator to tune - needed for sequential feature selector
+        
+    params : Dict
+        Is a dictionary with all parameters to try.
+        
+    kfold : Function
+        Is a iterator to do CV
+        
+    pipe : Pipe
+        Is the piped estimator, because some need feature scaling
+        
+    preprocessing : Pipe
+        Is the preprocessing pipe, as some need feature scaling and if we use sequential feature selector, the pipe is newly build (not all features used)
+        
+    X_train : Array
+        Is the training data for all features
+        
+    y_train : Array
+        Is the target variable
+        
+    sequentail_feature_selector : Boolean
+        If True, we use sequential feature selector, else not. The default is False.
+
+    Returns
+    -------
+    None.
+
+    '''
     if sequentail_feature_selector:
         sfs_grid = sfs(
             estimator = estimator,
@@ -286,11 +323,12 @@ gridsearch_finetuning(GaussianNB(),
 
 ## logistic regression
 lr_params = {
-    'model2__penalty': ['l1', 'l2', 'elasticnet'],
-    'model2__C': [0,0.3,0.6,0.9,1,2,5,10],
-    'model2__solver': ['saga'],
-    'model2__max_iter': [1000],
-    'model2__random_state': [190]
+    'logisticregression__penalty': ['l1', 'l2', 'elasticnet'],
+    'logisticregression__C': [0,0.3,0.6,0.9,1,2,5,10],
+    'logisticregression__solver': ['lbfgs', 'liblinear', 'saga'],
+    'logisticregression__max_iter': [1000],
+    'logisticregression__l1_ratio': [0,0.3,0.6,0.9, 1],
+    'logisticregression__random_state': [190]
     }
 
 gridsearch_finetuning(LogisticRegression(max_iter = 1000), 
@@ -311,8 +349,8 @@ gridsearch_finetuning(LogisticRegression(max_iter = 1000),
 
 ## k-Nearest-Neighbors
 knn_params = {
-    'model2__n_neighbors': np.arange(1,10,1),
-    'model2__weights': ['uniform', 'distance']
+    'kneighborsclassifier__n_neighbors': np.arange(1,10,1),
+    'kneighborsclassifier__weights': ['uniform', 'distance']
 }
 
 gridsearch_finetuning(KNeighborsClassifier(), 
@@ -333,11 +371,11 @@ gridsearch_finetuning(KNeighborsClassifier(),
 
 ## random forest
 rf_params = {
-    'randomforestclassifier__n_estimators': np.arange(100,600,200),
-    'randomforestclassifier__max_depth': np.arange(3,10,3),
+    'randomforestclassifier__n_estimators': [100, 200, 300],
+    'randomforestclassifier__max_depth': np.arange(3,22,3),
     #'model2__min_samples_split': np.arange(10,50,10), # The minimum number of samples required to split an internal node
     #'model2__min_samples_leaf': np.arange(10,50,10), # The minimum number of samples required to be at a leaf node. 
-    'randomforestclassifier__max_features': np.arange(9,50,3),
+    'randomforestclassifier__max_features': [10,20,30,40,50,60],
     #'model2__max_leaf_nodes': np.arange(10,50,10),
     #'model2__min_impurity_decrease': np.arange(0,5,1),
     'randomforestclassifier__random_state': [190]
@@ -353,9 +391,9 @@ gridsearch_finetuning(RandomForestClassifier(),
 
 ## ada boost
 ab_params = {
-    'model2__n_estimators': np.arange(1,250,50),
-    'model2__learning_rate': [0.0, 0.3, 0.6, 0.9, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0],
-    'model2__random_state': [190]
+    'adaboostclassifier__n_estimators': np.arange(1,301,50),
+    'adaboostclassifier__learning_rate': [0.0, 0.3, 0.6, 0.9, 1.0, 2.0, 5.0, 10.0, 50.0],
+    'adaboostclassifier__random_state': [190]
 }
 
 gridsearch_finetuning(AdaBoostClassifier(), 
@@ -368,15 +406,16 @@ gridsearch_finetuning(AdaBoostClassifier(),
 
 ## gradient boost
 gb_params = {
-    'model2__loss': ['log_loss', 'exponential'],
-    'model2__learning_rate': [0, 0.3, 0.6, 1, 2, 5],
-    'model2__n_estimators': np.arange(100,301,100),
+    'gradientboostingclassifier__loss': ['log_loss'],
+    'gradientboostingclassifier__learning_rate': [0.3, 0.6, 1, 5],
+    'gradientboostingclassifier__n_estimators': np.arange(100,301,100),
     #'model2__min_samples_split': np.arange(10,50,10), # The minimum number of samples required to split an internal node
     #'model2__min_samples_leaf': np.arange(10,50,10), # The minimum number of samples required to be at a leaf node. 
-    'model2__max_features': np.arange(9,60,10),
+    'gradientboostingclassifier__max_features': [10,30,60],
+    'gradientboostingclassifier__max_depth': [3,6,9],
     #'model2__max_leaf_nodes': np.arange(10,50,10),
     #'model2__min_impurity_decrease': np.arange(0,5,1),
-    'model2__random_state': [190]
+    'gradientboostingclassifier__random_state': [190]
 }
 
 gridsearch_finetuning(GradientBoostingClassifier(), 
@@ -389,11 +428,11 @@ gridsearch_finetuning(GradientBoostingClassifier(),
 
 ## xgboost
 xgb_params = {
-    'model2__eta': np.arange(0.1,1.1,0.3),
-    'model2__gamma': [0.3, 0.6, 1],
-    'model2__max_depth': np.arange(3,12,4),
-    'model2__lambda': [0.3, 0.6, 1],
-    'model2__alpha': [0.3, 0.6, 1],
+    'xgbclassifier__eta': np.arange(0.1,1.1,0.3),
+    'xgbclassifier__gamma': [0, 0.3, 0.6, 1],
+    'xgbclassifier__max_depth': [3,6,9],
+    'xgbclassifier__lambda': [0.3, 0.6, 1, 5],
+    'xgbclassifier__alpha': [0.3, 0.6, 1, 5],
     #'model2__max_leaves': np.arange(10,50,10)
 }
 
@@ -406,34 +445,154 @@ gridsearch_finetuning(xgb.XGBClassifier(),
                       y_train)
 
 # Build the stacked model
-#StackingClassifier(estimators, final_estimator)
 
-def gridsearch_stacking_model():
-    
-    estimators = [[('lr'), ]]
-    
-    
-    estimator = StackingClassifier(estimators, LogisticRegression())
-    estimator2 = StackingClassifier(estimators, RandomForest())
-    
-    pipe_gridsearch = Pipeline([('preprocess', preprocessing),
-                                ('model', estimator)])
-    
-    dt_grid_search = GridSearchCV(estimator = pipe_gridsearch,
-                                param_grid = params,
-                                refit = 'f1',
-                                scoring = ['roc_auc', 'f1', 'precision', 'recall'],
-                                cv = kfold,
-                                verbose = 2,
-                                return_train_score = True,
-                                n_jobs = -1)
-    
-    
-    dt_grid_search = dt_grid_search.fit(X_train, y_train)
+def stacked_model_gridsearch(models0: list, models1: list, params_models: list, kfold):
+    '''
+    This function helps to generate stacked models and do hyperparametertuning with CV.
 
+    Parameters
+    ----------
+    models0 : list
+        A list of base models to try.
+        
+    models1 : list
+        A list of meta learners to try.
+        
+    params_models : dict
+        Parameters for base models (from hyperparamtertuning) and parameters for hyperparametertuning of meta learner
+        
+    kfold : Function
+        k-Fold iterator
 
+    Returns
+    -------
+    Saves a Excel File with all scores
 
+    '''
+    final_df = pd.DataFrame()
+    for k, j in enumerate(models1):
+        for i in itertools.combinations(models0, 3):
+            pipe_gridsearch = Pipeline([('stacking', StackingClassifier(estimators = list(i),
+                                                                        final_estimator = j,
+                                                                        cv = kfold,
+                                                                        stack_method = 'predict_proba',
+                                                                        n_jobs = -1,
+                                                                        verbose = 2))
+                                        ])
+            
+            dt_grid_search = GridSearchCV(estimator = pipe_gridsearch,
+                                          param_grid = params_models[k],
+                                          refit = 'recall',
+                                          scoring = ['roc_auc', 'f1', 'precision', 'recall'],
+                                          cv = kfold,
+                                          verbose = 2,
+                                          return_train_score = True,
+                                          n_jobs = -1)
+            
+            dt_grid_search = dt_grid_search.fit(X_train, y_train)
+            
+            dt_cv_grid_search_results = pd.DataFrame(dt_grid_search.cv_results_)
+            dt_cv_grid_search_results['final_estimator'] = str(j).replace('()','')
+            dt_cv_grid_search_results['base_estimators'] = [l[0] for l in i]
 
+            final_df = pd.concat([final_df, dt_cv_grid_search_results], axis = 0)
+            
+    final_df.to_excel(f'plots/stacking/stacking_parameters_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
+            
+models0 = [('decisiontree', make_pipeline(DecisionTreeClassifier(max_depth = 18,
+                                                                 max_features = 30,
+                                                                 random_state = 190))),
+           ('GaussianNB', make_pipeline(make_column_transformer((num_pipeline,
+                                                                  ['darknet_markets', 
+                                                                   'lifetime', 
+                                                                   'min_addresses_per_transaction_sender', 
+                                                                   'max_addresses_perr_transaction_receiver', 
+                                                                   'std_addresses_per_transaction_receiver', 
+                                                                   'mean_addresses_per_transaction', 
+                                                                   'min_addresses_per_transaction', 
+                                                                   'std_addresses_per_transaction', 
+                                                                   'mean_time_diff_transaction', 
+                                                                   'concentration_addresses']),
+                                                                 remainder = 'drop',
+                                                                 verbose_feature_names_out = False),
+                                        GaussianNB(var_smoothing = 0.000285))),
+           ('LogisticReg', make_pipeline(make_column_transformer((num_pipeline,
+                                                                  ['count_transactions_receiver',
+                                                                   'count_transactions_s_equal_r',
+                                                                   'min_transaction_value', 
+                                                                   'max_transaction_value', 
+                                                                   'std_transaction_value', 
+                                                                   'min_transaction_value_sender', 
+                                                                   'max_transaction_value_sender', 
+                                                                   'std_transaction_value_sender', 
+                                                                   'min_transaction_value_receiver', 
+                                                                   'max_transaction_value_receiver', 
+                                                                   'std_transaction_value_receiver', 
+                                                                   'mean_balance', 
+                                                                   'std_balance', 
+                                                                   'min_addresses_per_transaction_receiver', 
+                                                                   'min_addresses_per_transaction', 
+                                                                   'transaction_volume_btc', 
+                                                                   'transaction_volume_receiver_btc', 
+                                                                   'transaction_volume_receiver_euro', 
+                                                                   'transaction_fee', 
+                                                                   'transaction_fee_receiver', 
+                                                                   'mean_transactions_receiver', 
+                                                                   'mean_transactions_s_equal_r', 
+                                                                   'mean_transactions_fee', 
+                                                                   'mean_transactions_fee_sender', 
+                                                                   'mean_transactions_fee_receiver', 
+                                                                   'mean_transactions_volume', 
+                                                                   'mean_transactions_volume_sender', 
+                                                                   'mean_transactions_volume_receiver', 
+                                                                   'concentration_addresses_receiver']),
+                                                                 remainder = 'drop',
+                                                                 verbose_feature_names_out = False),
+                                       LogisticRegression(solver = 'saga',
+                                                          max_iter = 1000))),
+           ('knn', make_pipeline(preprocessing,
+                                 KNeighborsClassifier(n_neighbors = 3,
+                                                      weights = 'distance'))),
+           ('rf', make_pipeline(RandomForestClassifier(max_depth = 18,
+                                                       max_features = 10,
+                                                       n_estimators = 100,
+                                                       random_state = 190))),
+           ('adaboost', make_pipeline(AdaBoostClassifier(learning_rate = 0.9,
+                                                         n_estimators = 250,
+                                                         random_state = 190))),
+           ('GradientBoosting', make_pipeline(GradientBoostingClassifier(learning_rate = 0.3,
+                                                                         loss = 'log_loss',
+                                                                         max_depth = 9,
+                                                                         max_features = 10,
+                                                                         n_estimators = 200,
+                                                                         random_state = 190))),
+           ('XGB', make_pipeline(xgb.XGBClassifier(reg_alpha = 0.3,
+                                                   eta = 0.7,
+                                                   gamma = 0.3,
+                                                   reg_lambda = 0.6,
+                                                   max_depth = 9,
+                                                   seed = 190)))]
+
+model1 = [LogisticRegression(), RandomForestClassifier()]
+
+params_model = [{
+    'stacking__final_estimator__penalty': ['elasticnet'],
+    'stacking__final_estimator__C': [0,0.3,0.6,0.9,1,2,5,10],
+    'stacking__final_estimator__solver': ['saga'],
+    'stacking__final_estimator__max_iter': [1000],
+    'stacking__final_estimator__l1_ratio': [0,0.3,0.6,0.9,1],
+    'stacking__final_estimator__random_state': [190]
+    },
+    {
+    'stacking__final_estimator__n_estimators': [100, 200, 300],
+    'stacking__final_estimator__max_depth': np.arange(3,22,3),
+    #'model2__min_samples_split': np.arange(10,50,10), # The minimum number of samples required to split an internal node
+    #'model2__min_samples_leaf': np.arange(10,50,10), # The minimum number of samples required to be at a leaf node. 
+    'stacking__final_estimator__max_features': [10,20,30,40,50,60],
+    #'model2__max_leaf_nodes': np.arange(10,50,10),
+    #'model2__min_impurity_decrease': np.arange(0,5,1),
+    'stacking__final_estimator__random_state': [190]
+    }]
 
 
 
