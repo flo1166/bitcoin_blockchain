@@ -492,12 +492,13 @@ def stacked_model_gridsearch(models0: list, models1: list, params_models: list, 
             dt_grid_search = dt_grid_search.fit(X_train, y_train)
             
             dt_cv_grid_search_results = pd.DataFrame(dt_grid_search.cv_results_)
-            dt_cv_grid_search_results['final_estimator'] = str(j).replace('()','')
-            dt_cv_grid_search_results['base_estimators'] = [l[0] for l in i]
+            final_est = str(j).replace('()','')
+            base_est = str([l[0] for l in i])
+            dt_cv_grid_search_results['final_estimator'] = final_est
+            dt_cv_grid_search_results['base_estimators'] = base_est
 
-            final_df = pd.concat([final_df, dt_cv_grid_search_results], axis = 0)
-            
-    final_df.to_excel(f'plots/stacking/stacking_parameters_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
+            dt_cv_grid_search_results.to_excel(f'plots/stacking/stacking_parameters_{final_est}_{base_est.replace("[","").replace("]","").replace(" ","_")}_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
+
             
 models0 = [('decisiontree', make_pipeline(DecisionTreeClassifier(max_depth = 18,
                                                                  max_features = 30,
@@ -577,10 +578,10 @@ model1 = [LogisticRegression(), RandomForestClassifier()]
 
 params_model = [{
     'stacking__final_estimator__penalty': ['elasticnet'],
-    'stacking__final_estimator__C': [0,0.3,0.6,0.9,1,2,5,10],
+    'stacking__final_estimator__C': [0,0.3,0.6,0.9,1,2,5],
     'stacking__final_estimator__solver': ['saga'],
     'stacking__final_estimator__max_iter': [1000],
-    'stacking__final_estimator__l1_ratio': [0,0.3,0.6,0.9,1],
+    'stacking__final_estimator__l1_ratio': [0,0.3,0.6,1],
     'stacking__final_estimator__random_state': [190]
     },
     {
@@ -588,13 +589,13 @@ params_model = [{
     'stacking__final_estimator__max_depth': np.arange(3,22,3),
     #'model2__min_samples_split': np.arange(10,50,10), # The minimum number of samples required to split an internal node
     #'model2__min_samples_leaf': np.arange(10,50,10), # The minimum number of samples required to be at a leaf node. 
-    'stacking__final_estimator__max_features': [10,20,30,40,50,60],
+    'stacking__final_estimator__max_features': [10,30,60],
     #'model2__max_leaf_nodes': np.arange(10,50,10),
     #'model2__min_impurity_decrease': np.arange(0,5,1),
     'stacking__final_estimator__random_state': [190]
     }]
 
-
+stacked_model_gridsearch(models0, model1, params_model, kfold)
 
 
 
