@@ -209,9 +209,9 @@ pipeline_list = [pipe_DT,
                  pipe_XGB]
 
 # Shortlisting
-notify_telegram_bot(f'Starting shortlisting at {datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.')
-score_quick_models(X_train, y_train, kfold, pipeline_list)
-notify_telegram_bot(f'Finished shortlisting at {datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.')
+#notify_telegram_bot(f'Starting shortlisting at {datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.')
+#score_quick_models(X_train, y_train, kfold, pipeline_list)
+#notify_telegram_bot(f'Finished shortlisting at {datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.')
 
 # Finetuning
 
@@ -299,27 +299,27 @@ dt_params = {
     'decisiontreeclassifier__random_state': [190]
     }
 
-gridsearch_finetuning(DecisionTreeClassifier(), 
-                      dt_params, 
-                      kfold, 
-                      pipe_DT, 
-                      preprocessing, 
-                      X_train, 
-                      y_train)
+#gridsearch_finetuning(DecisionTreeClassifier(), 
+#                      dt_params, 
+#                      kfold, 
+#                      pipe_DT, 
+#                      preprocessing, 
+#                      X_train, 
+#                      y_train)
 
 ## gausian naive bayes
 gnb_params = {
     'gaussiannb__var_smoothing': np.logspace(0,-9, num=100)
     }
 
-gridsearch_finetuning(GaussianNB(), 
-                      gnb_params, 
-                      kfold, 
-                      pipe_gNB, 
-                      preprocessing, 
-                      X_train, 
-                      y_train, 
-                      True)
+#gridsearch_finetuning(GaussianNB(), 
+#                      gnb_params, 
+#                      kfold, 
+#                      pipe_gNB, 
+#                      preprocessing, 
+#                      X_train, 
+#                      y_train, 
+#                      True)
 
 ## logistic regression
 lr_params = {
@@ -331,14 +331,14 @@ lr_params = {
     'logisticregression__random_state': [190]
     }
 
-gridsearch_finetuning(LogisticRegression(max_iter = 1000), 
-                      lr_params, 
-                      kfold, 
-                      pipe_LR, 
-                      preprocessing, 
-                      X_train, 
-                      y_train, 
-                      True)
+#gridsearch_finetuning(LogisticRegression(max_iter = 1000), 
+#                      lr_params, 
+#                      kfold, 
+#                      pipe_LR, 
+#                      preprocessing, 
+#                      X_train, 
+#                      y_train, 
+#                      True)
 
 ## Support Vector Machine
 # svc_params = {
@@ -353,14 +353,14 @@ knn_params = {
     'kneighborsclassifier__weights': ['uniform', 'distance']
 }
 
-gridsearch_finetuning(KNeighborsClassifier(), 
-                      knn_params, 
-                      kfold, 
-                      pipe_kNN, 
-                      preprocessing, 
-                      X_train, 
-                      y_train, 
-                      True)
+#gridsearch_finetuning(KNeighborsClassifier(), 
+#                      knn_params, 
+#                      kfold, 
+#                      pipe_kNN, 
+#                      preprocessing, 
+#                      X_train, 
+#                      y_train, 
+#                      True)
 
 ## k-Means
 # km_params = {
@@ -381,13 +381,13 @@ rf_params = {
     'randomforestclassifier__random_state': [190]
 }
 
-gridsearch_finetuning(RandomForestClassifier(), 
-                      rf_params, 
-                      kfold, 
-                      pipe_RF, 
-                      preprocessing, 
-                      X_train, 
-                      y_train)
+#gridsearch_finetuning(RandomForestClassifier(), 
+#                      rf_params, 
+#                      kfold, 
+#                      pipe_RF, 
+#                      preprocessing, 
+#                      X_train, 
+#                      y_train)
 
 ## ada boost
 ab_params = {
@@ -396,13 +396,13 @@ ab_params = {
     'adaboostclassifier__random_state': [190]
 }
 
-gridsearch_finetuning(AdaBoostClassifier(), 
-                      ab_params, 
-                      kfold, 
-                      pipe_AB, 
-                      preprocessing, 
-                      X_train, 
-                      y_train)
+#gridsearch_finetuning(AdaBoostClassifier(), 
+#                      ab_params, 
+#                      kfold, 
+#                      pipe_AB, 
+#                      preprocessing, 
+#                      X_train, 
+#                      y_train)
 
 ## gradient boost
 gb_params = {
@@ -418,13 +418,13 @@ gb_params = {
     'gradientboostingclassifier__random_state': [190]
 }
 
-gridsearch_finetuning(GradientBoostingClassifier(), 
-                      gb_params, 
-                      kfold, 
-                      pipe_GB, 
-                      preprocessing, 
-                      X_train, 
-                      y_train)
+#gridsearch_finetuning(GradientBoostingClassifier(), 
+#                      gb_params, 
+#                      kfold, 
+#                      pipe_GB, 
+#                      preprocessing, 
+#                      X_train, 
+#                      y_train)
 
 ## xgboost
 xgb_params = {
@@ -436,13 +436,13 @@ xgb_params = {
     #'model2__max_leaves': np.arange(10,50,10)
 }
 
-gridsearch_finetuning(xgb.XGBClassifier(), 
-                      xgb_params, 
-                      kfold, 
-                      pipe_XGB, 
-                      preprocessing, 
-                      X_train, 
-                      y_train)
+#gridsearch_finetuning(xgb.XGBClassifier(), 
+#                      xgb_params, 
+#                      kfold, 
+#                      pipe_XGB, 
+#                      preprocessing, 
+#                      X_train, 
+#                      y_train)
 
 # Build the stacked model
 
@@ -469,7 +469,7 @@ def stacked_model_gridsearch(models0: list, models1: list, params_models: list, 
     Saves a Excel File with all scores
 
     '''
-    final_df = pd.DataFrame()
+    
     for k, j in enumerate(models1):
         for i in itertools.combinations(models0, 3):
             pipe_gridsearch = Pipeline([('stacking', StackingClassifier(estimators = list(i),
@@ -487,7 +487,7 @@ def stacked_model_gridsearch(models0: list, models1: list, params_models: list, 
                                           cv = kfold,
                                           verbose = 2,
                                           return_train_score = True,
-                                          n_jobs = -1)
+                                          n_jobs = 1)
             
             dt_grid_search = dt_grid_search.fit(X_train, y_train)
             
@@ -578,7 +578,7 @@ model1 = [LogisticRegression(), RandomForestClassifier()]
 
 params_model = [{
     'stacking__final_estimator__penalty': ['elasticnet'],
-    'stacking__final_estimator__C': [0,0.3,0.6,0.9,1,2,5],
+    'stacking__final_estimator__C': [0.1,0.5,1,5],
     'stacking__final_estimator__solver': ['saga'],
     'stacking__final_estimator__max_iter': [1000],
     'stacking__final_estimator__l1_ratio': [0,0.3,0.6,1],
@@ -586,7 +586,7 @@ params_model = [{
     },
     {
     'stacking__final_estimator__n_estimators': [100, 200, 300],
-    'stacking__final_estimator__max_depth': np.arange(3,22,3),
+    'stacking__final_estimator__max_depth': np.arange(3,22,6),
     #'model2__min_samples_split': np.arange(10,50,10), # The minimum number of samples required to split an internal node
     #'model2__min_samples_leaf': np.arange(10,50,10), # The minimum number of samples required to be at a leaf node. 
     'stacking__final_estimator__max_features': [10,30,60],
@@ -595,7 +595,7 @@ params_model = [{
     'stacking__final_estimator__random_state': [190]
     }]
 
-stacked_model_gridsearch(models0, model1, params_model, kfold)
+#stacked_model_gridsearch(models0, model1, params_model, kfold)
 
 
 
@@ -613,59 +613,59 @@ stacked_model_gridsearch(models0, model1, params_model, kfold)
 
 # Evaluation Model
 ## Logistic Regression
-pipe = Pipeline([('preprocess', preprocessing),
-                 ('model2', LogisticRegression(C=2, max_iter = 1000, penalty = 'l2', random_state = 190, solver= 'lbfgs'))])
-pipe = pipe.fit(X_train, y_train)
+#pipe = Pipeline([('preprocess', preprocessing),
+#                 ('model2', LogisticRegression(C=2, max_iter = 1000, penalty = 'l2', random_state = 190, solver= 'lbfgs'))])
+#pipe = pipe.fit(X_train, y_train)
 
-y_prob_pred = pipe.predict_proba(X_train)[:, 1] # IMPORTANT: note the "[:, 1]"
-y_prob_pred_test = pipe.predict_proba(X_test)[:, 1] # IMPORTANT: note the "[:, 1]"
+# y_prob_pred = pipe.predict_proba(X_train)[:, 1] # IMPORTANT: note the "[:, 1]"
+# y_prob_pred_test = pipe.predict_proba(X_test)[:, 1] # IMPORTANT: note the "[:, 1]"
 
-def plotting_precision_recall_curve(y_train, y_prob_pred):
-    precisions, recalls, thresholds = precision_recall_curve(y_train, y_prob_pred)
+# def plotting_precision_recall_curve(y_train, y_prob_pred):
+#     precisions, recalls, thresholds = precision_recall_curve(y_train, y_prob_pred)
     
-    sns.set(font_scale=1.6)
-    sns.set_style("whitegrid")
+#     sns.set(font_scale=1.6)
+#     sns.set_style("whitegrid")
     
-    plt.plot(precisions, recalls, '-o', label="logistic regression") # IMPORTANT
-    positive_fraction = np.sum(y_train == 1) / len(y_train)
-    plt.plot([0,1], [positive_fraction, positive_fraction], '--', lw=3, label="'no skill' baseline")
-    plt.xlabel("precision")
-    plt.ylabel("recall")
-    plt.legend()
-    ax = plt.gca()
-    ax.xaxis.set_major_locator(MultipleLocator(0.1))
-    ax.yaxis.set_major_locator(MultipleLocator(0.05))
-    ax.tick_params(axis='both', which='both', labelsize=12)
-    plt.title("precision-recall curve")
-    plt.xlim([0.5, 1.03]) # to only show the relevant part of the plot
-    #plt.grid(which='both')
-    ax.grid(which='major', color='gray', linestyle='--')
-    plt.show()
+#     plt.plot(precisions, recalls, '-o', label="logistic regression") # IMPORTANT
+#     positive_fraction = np.sum(y_train == 1) / len(y_train)
+#     plt.plot([0,1], [positive_fraction, positive_fraction], '--', lw=3, label="'no skill' baseline")
+#     plt.xlabel("precision")
+#     plt.ylabel("recall")
+#     plt.legend()
+#     ax = plt.gca()
+#     ax.xaxis.set_major_locator(MultipleLocator(0.1))
+#     ax.yaxis.set_major_locator(MultipleLocator(0.05))
+#     ax.tick_params(axis='both', which='both', labelsize=12)
+#     plt.title("precision-recall curve")
+#     plt.xlim([0.5, 1.03]) # to only show the relevant part of the plot
+#     #plt.grid(which='both')
+#     ax.grid(which='major', color='gray', linestyle='--')
+#     plt.show()
     
-    # from the documentation:
-    # The last precision and recall values are 1. and 0. respectively and do not have a corresponding threshold.
-    # -> we need to drop the last precision and recall values in this plot
-    plt.plot(thresholds, precisions[:-1], '-o', label="precision")
-    plt.plot(thresholds, recalls[:-1], '-o', label="recall")
-    plt.xlabel("threshold")
-    plt.legend()
-    #plt.grid(which='both')
-    plt.title("Plot for reading off thresholds for given operating point", size=15)
-    ax = plt.gca()
-    ax.xaxis.set_major_locator(MultipleLocator(0.1))
-    ax.yaxis.set_major_locator(MultipleLocator(0.05))
-    ax.tick_params(axis='both', which='both', labelsize=12)
-    ax.grid(which='major', color='gray', linestyle='--')
-    ax.set_ylim([0.5, 1])
-    plt.show()
-    return precisions, recalls, thresholds
+#     # from the documentation:
+#     # The last precision and recall values are 1. and 0. respectively and do not have a corresponding threshold.
+#     # -> we need to drop the last precision and recall values in this plot
+#     plt.plot(thresholds, precisions[:-1], '-o', label="precision")
+#     plt.plot(thresholds, recalls[:-1], '-o', label="recall")
+#     plt.xlabel("threshold")
+#     plt.legend()
+#     #plt.grid(which='both')
+#     plt.title("Plot for reading off thresholds for given operating point", size=15)
+#     ax = plt.gca()
+#     ax.xaxis.set_major_locator(MultipleLocator(0.1))
+#     ax.yaxis.set_major_locator(MultipleLocator(0.05))
+#     ax.tick_params(axis='both', which='both', labelsize=12)
+#     ax.grid(which='major', color='gray', linestyle='--')
+#     ax.set_ylim([0.5, 1])
+#     plt.show()
+#     return precisions, recalls, thresholds
 
-precisions, recalls, thresholds = plotting_precision_recall_curve(y_train, y_prob_pred)
-good_precisions = precisions * (recalls >= 0.97) # set all precisions to zero where the recall is too low
-best_index = np.argmax(good_precisions)
-threshold = thresholds[best_index]
+# precisions, recalls, thresholds = plotting_precision_recall_curve(y_train, y_prob_pred)
+# good_precisions = precisions * (recalls >= 0.97) # set all precisions to zero where the recall is too low
+# best_index = np.argmax(good_precisions)
+# threshold = thresholds[best_index]
 
-threshold_list = [0.05,0.1,0.13026619778545878, 0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,.7,.75,.8,.85,.9,.95,.99]
+# threshold_list = [0.05,0.1,0.13026619778545878, 0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,.7,.75,.8,.85,.9,.95,.99]
 
 def custom_threshold_logistic_regression(threshold_list, y_prob_pred, y_train):
     df = pd.DataFrame(data = {'threshold':[], 'precision':[], 'recall':[], 'f1':[], 'roc_auc':[], 'confusion (tn, fp) (fn, tp)': []})
@@ -686,41 +686,64 @@ def custom_threshold_logistic_regression(threshold_list, y_prob_pred, y_train):
         df = pd.concat([df, pd.DataFrame(data = {'threshold':[i], 'precision':[precision], 'recall':[recall], 'f1':[f1], 'roc_auc':[roc_auc], 'confusion (tn, fp) (fn, tp)':[confusion]})], axis = 0)
     df.to_excel(f'plots/finetuning/logistic_regression_custom_threshold_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
 
-custom_threshold_logistic_regression(threshold_list, y_prob_pred, y_train)
+# custom_threshold_logistic_regression(threshold_list, y_prob_pred, y_train)
 
 ## Smart Local Moving Algorithm
-def smart_local_moving(X_train, y_train):
-    df_addresses = dd.read_parquet('addresses_per_address')
+
+def scoring_manuel(y_pred, y_true):
+    precision = precision_score(y_true,
+                                y_pred)
+    recall = recall_score(y_true,
+                          y_pred)
+    f1 = f1_score(y_true,
+                  y_pred)
+    roc_auc = roc_auc_score(y_true,
+                            y_pred)
+    confusion = confusion_matrix(y_true,
+                                 y_pred)
+    return pd.concat([df, pd.DataFrame(data = {'precision':[precision], 'recall':[recall], 'f1':[f1], 'roc_auc':[roc_auc], 'confusion (tn, fp) (fn, tp)':[confusion]})], axis = 0)
+    
+def count_transaction_illegal(df, df_illegal):
+    df_all = dd.concat([dd.read_parquet('tx_in-610682-663904'), 
+                        dd.read_parquet('tx_out-610682-663904')], axis = 0)
+    df_all = df_all[['address', 'txid']]
+    txid_illegal = df_all[df_all['address'].isin(df_illegal)]['txid']
+    df_all = df_all.compute()
+    df_all = df_all[df_all['txid'].isin(txid_illegal)]
+    df_all = df_all.groupby('address')['txid'].nunique()
+    df_all = df_all.reset_index()
+    df_all = df_all.rename(columns = {'txid': 'count_transaction_illegal'})
+
+    df = df.merge(df_all, on = 'address', how = 'left')
+    df['count_transaction_illegal'] = df['count_transaction_illegal'].fillna(0)
+ 
+    return df
+    
+def smart_local_moving(X_train, y_train, df_ml):
     df = pd.concat([X_train, y_train], axis = 1)
-    df = df.merge(df_addresses, left_on = df.index, right_on = 'address', how = 'left').compute()
+    df['address'] = df_ml.reset_index()[['address']].iloc[list(df.index),:]
+    df = df.loc[:, ['address', 'count_transactions', 'illicit']]
+    df = df.set_index('address')
     df['pred'] = df['illicit']
-    df_illegal = list(df[df['pred'] == 1].index())
+    df_illegal = list(df[df['pred'] == 1].index)
+    df = df.loc[:, ['count_transactions', 'illicit' ,'pred']]
     
     changed = True
     while changed:
         changed = False
-        for i in df.index:
-            if (sum(df.loc['i','adresses']).isin(df_illegal) / len(df.loc['i','adresses'])) > 0.5:
-                if df.loc['i','pred'] == 0:
-                    df.loc['i','pred'] = 1
-                    changed = True
-                    df_illegal = list(df[df['pred'] == 1].index())
-            else:
-                if df.loc['i','pred'] == 1:
-                    df.loc['i','pred'] = 0
-                    changed = True
-                    df_illegal = list(df[df['pred'] == 1].index())
+        df = count_transaction_illegal(df, df_illegal)
+        df['pred2'] = df['count_transaction_illegal'] / df['count_transactions']
+        df['pred2'] = np.where(df['pred2'] % 1 == 0.5, df['pred2'] + 0.1, df['pred2'])
+        df['pred2'] = round(df['pred2'], 0)
+        if (df['pred'].equals(df['pred2'])) == False:
+            changed = True
+            df['pred'] = df['pred2']
+            df_illegal = set(list(df[df['pred'] == 1]['address']))
+
         print(changed, datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S"))
                     
-    precision = precision_score(df['illicit'],
-                                df['pred'])
-    recall = recall_score(df['illicit'],
-                          df['pred'])
-    f1 = f1_score(df['illicit'],
-                  df['pred'])
-    roc_auc = roc_auc_score(df['illicit'],
-                            df['pred'])
-    confusion = confusion_matrix(df['illicit'],
-                                 df['pred'])
-    df = pd.concat([df, pd.DataFrame(data = {'threshold':[i], 'precision':[precision], 'recall':[recall], 'f1':[f1], 'roc_auc':[roc_auc], 'confusion (tn, fp) (fn, tp)':[confusion]})], axis = 0)
+    df = scoring_manuel(df['illicit'], df['pred'])
     df.to_excel(f'plots/evaluation/smart_local_moving_algorithm_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
+
+smart_local_moving(X_train, y_train, df_ml)
+smart_local_moving(X_test, y_test, df_ml)
