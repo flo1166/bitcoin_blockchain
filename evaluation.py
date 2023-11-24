@@ -27,77 +27,6 @@ from matplotlib.ticker import MultipleLocator
 import dask.dataframe as dd
 import datetime
 
-def build_data(df):
-    '''
-    This function builds the training and test set with up and downsampling
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame to process.
-
-    Returns
-    -------
-    X_train : array
-        This are the independent variables of the training data.
-    X_test : array
-        This are the independent variables of the test data.
-    y_train : array
-        This is the dependent variables of the training data.
-    y_test : array
-        This is the dependent variables of the test data.
-    df_ml : pd.DataFrame
-        This is the complete machine learning data frame.
-
-    '''
-    # Preprocessing
-    df = df.set_index('address')
-    df = df.fillna(0)
-    df = df.replace(float('inf'), 0)
-    df['lifetime'] = df['lifetime'].replace(0, 1)
-    df['mean_transactions'] = df['count_transactions'] / df['lifetime']
-    df['mean_transactions_sender'] = df['count_transactions_sender'] / df['lifetime']
-    df['mean_transactions_receiver'] = df['count_transactions_receiver'] / df['lifetime']
-    df_illicit = df[df['illicit'] == 1]
-    df_licit = df[df['illicit'] == 0]
-    
-    # Upsample
-    df_illicit = df_illicit.sample(frac = 4.6108,
-                                   replace = True,
-                                   random_state = 190)
-    
-    index_df = df_illicit.index.unique()
-    df_1 = df[df['illicit'] == 1]
-    df_1 = df_1[~df_1.index.isin(index_df)]
-    
-    df_ml = pd.concat([df_licit, df_illicit, df_1], axis = 0)
-    
-    # Split in train and test data
-    X_train, X_test, y_train, y_test = train_test_split(df_ml.loc[:, df_ml.columns != 'illicit'], 
-                                                        df_ml['illicit'],
-                                                        train_size = 0.7, 
-                                                        random_state = 190, 
-                                                        stratify = df_ml['illicit'], 
-                                                        shuffle=True)
-    return X_train, X_test, y_train, y_test, df_ml
-
-# Read Data
-path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
-os.chdir(path)
-df = pd.read_parquet('final_data_set')
-X_train, X_test, y_train, y_test, df_ml = build_data(df)
-
-# normalisation
-num_attribs = df_ml.columns
-num_attribs = num_attribs.to_list()
-num_attribs = [i for i in num_attribs if i != 'illicit' ]
-
-num_pipeline = make_pipeline(StandardScaler())
-
-preprocessing = make_column_transformer((num_pipeline, num_attribs), 
-                                        remainder = 'passthrough',
-                                        verbose_feature_names_out = False)
-
 def scoring_manuel(y_pred, y_true):
     '''
     This function helps to evaluate precision, recall, f1-score and roc-auc of given input.
@@ -127,18 +56,6 @@ def scoring_manuel(y_pred, y_true):
                                  y_pred)
     return pd.concat([pd.DataFrame(data = {'precision':[precision], 'recall':[recall], 'f1':[f1], 'roc_auc':[roc_auc], 'confusion (tn, fp) (fn, tp)':[confusion]})], axis = 0)
     
-# Evaluation Model
-## Logistic Regression
-# Trainingscore
-pipe = Pipeline([('preprocess', preprocessing),
-                 ('model2', LogisticRegression(C=2, max_iter = 1000, penalty = 'l2', random_state = 190, solver= 'lbfgs'))])
-pipe = pipe.fit(X_train, y_train)
-
-y_prob_pred = pipe.predict_proba(X_train)[:, 1] # IMPORTANT: note the "[:, 1]"
-
-# Testscore
-y_prob_pred_test = pipe.predict_proba(X_test)[:, 1] # IMPORTANT: note the "[:, 1]"
-
 def plotting_precision_recall_curve(y_train, y_prob_pred):
     precisions, recalls, thresholds = precision_recall_curve(y_train, y_prob_pred)
     
@@ -179,13 +96,6 @@ def plotting_precision_recall_curve(y_train, y_prob_pred):
     plt.show()
     return precisions, recalls, thresholds
 
-precisions, recalls, thresholds = plotting_precision_recall_curve(y_train, y_prob_pred)
-good_precisions = precisions * (recalls >= 0.97) # set all precisions to zero where the recall is too low
-best_index = np.argmax(good_precisions)
-threshold = thresholds[best_index]
-
-threshold_list = [0.05,0.1,0.13026619778545878, 0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,.7,.75,.8,.85,.9,.95,.99]
-
 def custom_threshold_logistic_regression(threshold_list, y_prob_pred, y_train):
     df = pd.DataFrame(data = {'threshold':[], 'precision':[], 'recall':[], 'f1':[], 'roc_auc':[], 'confusion (tn, fp) (fn, tp)': []})
     
@@ -204,10 +114,6 @@ def custom_threshold_logistic_regression(threshold_list, y_prob_pred, y_train):
                                      Y_test_pred[0])
         df = pd.concat([df, pd.DataFrame(data = {'threshold':[i], 'precision':[precision], 'recall':[recall], 'f1':[f1], 'roc_auc':[roc_auc], 'confusion (tn, fp) (fn, tp)':[confusion]})], axis = 0)
     df.to_excel(f'plots/finetuning/logistic_regression_custom_threshold_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
-
-custom_threshold_logistic_regression(threshold_list, y_prob_pred, y_train)
-
-## Smart Local Moving Algorithm
 
 def count_transaction_illegal(df, df_illegal):
     '''
@@ -241,7 +147,7 @@ def count_transaction_illegal(df, df_illegal):
  
     return df
     
-def smart_local_moving(X_train, y_train, df_ml):
+def smart_local_moving(X_train, y_train, df_ml, schwellenwert = 0.5):
     '''
     The implementation of the smart local moving algorithm
 
@@ -285,42 +191,83 @@ def smart_local_moving(X_train, y_train, df_ml):
     df = scoring_manuel(df['illicit'], df['pred'])
     df.to_excel(f'plots/evaluation/smart_local_moving_algorithm_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
 
-smart_local_moving(X_train, y_train, df_ml)
-smart_local_moving(X_test, y_test, df_ml)
-
-# finales Stacking Modell
-models0 = [('decisiontree', make_pipeline(DecisionTreeClassifier(max_depth = 18,
-                                                                 max_features = 30,
-                                                                 random_state = 190))),
-           ('knn', make_pipeline(preprocessing,
-                                 KNeighborsClassifier(n_neighbors = 3,
-                                                      weights = 'distance'))),
-           ('XGB', make_pipeline(xgb.XGBClassifier(reg_alpha = 0.3,
-                                                   eta = 0.7,
-                                                   gamma = 0.3,
-                                                   reg_lambda = 0.6,
-                                                   max_depth = 9,
-                                                   seed = 190)))]
-
-model1 = LogisticRegression(C = 0.1,
-                            l1_ratio = 0.6,
-                            max_iter = 1000,
-                            penalty = 'elasticnet',
-                            random_state = 190,
-                            solver = 'saga')
-
-kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=190)
-
-stacked_model = StackingClassifier(estimators = models0,
-                   final_estimator = model1,
-                   cv = kfold,
-                   stack_method = 'predict_proba',
-                   n_jobs = -1,
-                   verbose = 2)
-
-stacked_model.fit(X_train, y_train)
-
-y_pred_stacked = stacked_model.predict(X_test)
-scored_stacked_model = scoring_manuel(y_pred_stacked, y_test)
-scored_stacked_model.to_excel(f'plots/stacking/final_stacking_model_performance_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
+if __name__ == '__main__':
+    from modeling import build_data
+    # Read Data
+    path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
+    os.chdir(path)
+    df = pd.read_parquet('final_data_set')
+    X_train, X_test, y_train, y_test, df_ml = build_data(df)
+    
+    # normalisation
+    num_attribs = df_ml.columns
+    num_attribs = num_attribs.to_list()
+    num_attribs = [i for i in num_attribs if i != 'illicit' ]
+    
+    num_pipeline = make_pipeline(StandardScaler())
+    
+    preprocessing = make_column_transformer((num_pipeline, num_attribs), 
+                                            remainder = 'passthrough',
+                                            verbose_feature_names_out = False)
+    
+    # Evaluation Model
+    ## Logistic Regression
+    # Trainingscore
+    pipe = Pipeline([('preprocess', preprocessing),
+                     ('model2', LogisticRegression(C=2, max_iter = 1000, penalty = 'l2', random_state = 190, solver= 'lbfgs'))])
+    pipe = pipe.fit(X_train, y_train)
+    
+    y_prob_pred = pipe.predict_proba(X_train)[:, 1] # IMPORTANT: note the "[:, 1]"
+    
+    # Testscore
+    y_prob_pred_test = pipe.predict_proba(X_test)[:, 1] # IMPORTANT: note the "[:, 1]"
+    
+    precisions, recalls, thresholds = plotting_precision_recall_curve(y_train, y_prob_pred)
+    good_precisions = precisions * (recalls >= 0.97) # set all precisions to zero where the recall is too low
+    best_index = np.argmax(good_precisions)
+    threshold = thresholds[best_index]
+    
+    threshold_list = [0.05,0.1,0.13026619778545878, 0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,.7,.75,.8,.85,.9,.95,.99]
+    
+    custom_threshold_logistic_regression(threshold_list, y_prob_pred, y_train)
+    
+    ## Smart Local Moving Algorithm
+    smart_local_moving(X_train, y_train, df_ml)
+    smart_local_moving(X_test, y_test, df_ml)
+    
+    # finales Stacking Modell
+    models0 = [('decisiontree', make_pipeline(DecisionTreeClassifier(max_depth = 18,
+                                                                     max_features = 30,
+                                                                     random_state = 190))),
+               ('knn', make_pipeline(preprocessing,
+                                     KNeighborsClassifier(n_neighbors = 3,
+                                                          weights = 'distance'))),
+               ('XGB', make_pipeline(xgb.XGBClassifier(reg_alpha = 0.3,
+                                                       eta = 0.7,
+                                                       gamma = 0.3,
+                                                       reg_lambda = 0.6,
+                                                       max_depth = 9,
+                                                       seed = 190)))]
+    
+    model1 = LogisticRegression(C = 0.1,
+                                l1_ratio = 0.6,
+                                max_iter = 1000,
+                                penalty = 'elasticnet',
+                                random_state = 190,
+                                solver = 'saga')
+    
+    kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=190)
+    
+    stacked_model = StackingClassifier(estimators = models0,
+                       final_estimator = model1,
+                       cv = kfold,
+                       stack_method = 'predict_proba',
+                       n_jobs = -1,
+                       verbose = 2)
+    
+    stacked_model.fit(X_train, y_train)
+    
+    y_pred_stacked = stacked_model.predict(X_test)
+    scored_stacked_model = scoring_manuel(y_pred_stacked, y_test)
+    scored_stacked_model.to_excel(f'plots/stacking/final_stacking_model_performance_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}.xlsx')
 

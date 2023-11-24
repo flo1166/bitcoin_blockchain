@@ -11,35 +11,6 @@ os.chdir(path)
 from notifier import notify_telegram_bot
 import pyarrow as pa
 
-# Read paths and list files
-path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
-os.chdir(path)
-files_filepath = os.listdir('C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/')
-#files_blocks = list(filter(re.compile(r"blocks-.*").match, files_filepath))
-#files_transactions = list(filter(re.compile(r"transactions-.*").match, files_filepath))
-files_tx_in = list(filter(re.compile(r"tx_in-.*").match, files_filepath))
-files_tx_out = list(filter(re.compile(r"tx_out-.*").match, files_filepath))
-
-# Build dataframe schema
-block_col = ['block_hash','height','version','blocksize','hashPrev','hashMerkleRoot','nTime','nBits','nNonce']
-trans_col = ['txid','hashBlock','version','lockTime']
-tx_in_col = ['txid','hashPrevOut','indexPrevOut','scriptSig','sequence']
-tx_ou_col = ['txid','indexOut','value','scriptPubKey','address']
-
-# naming for saving csv file
-partition_name = '610682-663904'
-
-# btc exchange rates for 2020
-btc_exchange_rate_2020 = pd.read_csv('btc_eur_wechselkurs.csv', sep = ';' , thousands='.', decimal=',', usecols = ['Schlusskurs'])
-btc_exchange_rate_2020 = btc_exchange_rate_2020.set_index(pd.to_datetime(pd.read_csv('btc_eur_wechselkurs.csv', sep = ';', usecols = ['Datum'])['Datum'], dayfirst = True).dt.strftime('%Y-%m-%d'))
-btc_exchange_rate_2020 = btc_exchange_rate_2020['Schlusskurs'].to_dict()
-
-# DarkNet Markets
-darknet_markets = pd.read_csv('DarkNetMarkets.csv', sep = ';', parse_dates = ['Datum'])
-
-# Adresses used for research (illegal and legal)
-addresses_used = dd.concat([dd.read_parquet('illegal_addresses'), dd.read_parquet('sample_legal_addresses')], axis = 0).compute()
-
 def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, files_tx_out: list, i: int, blocks = False):
     '''
     Reads in big data files with dask of a file directory with iterator (which entries of file directory should be read - e.g. 0 -> first file of transactions, tx_in, tx_out)
@@ -92,11 +63,7 @@ def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, 
         tx_out = dd.read_parquet(files_tx_out[i])
         return tx_in, tx_out
     
-#blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 1)
-
-#transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute() # 53.223 Transaktionen für 2020
-
-def file_writer(df, filename, schema = None, csv = False, json = False, feature = True, overwrite = False):
+def file_writer(df, filename, schema = None, csv = False, json = False, feature = True):
     '''
     This function saves a file as parquet, csv or json
 
@@ -137,9 +104,9 @@ def file_writer(df, filename, schema = None, csv = False, json = False, feature 
         df.to_json(filename, orient = 'records') 
     else:
         if schema == None:
-            df.to_parquet(filename, engine = 'pyarrow', overwrite = overwrite)
+            df.to_parquet(filename, engine = 'pyarrow')
         else: 
-            df.to_parquet(filename, engine = 'pyarrow', schema = schema, overwrite = overwrite)
+            df.to_parquet(filename, engine = 'pyarrow', schema = schema)
  
 def check_df_length(filename, directory = None):
     '''
@@ -164,7 +131,6 @@ def check_df_length(filename, directory = None):
         print(df.isnull().sum().compute())
         print(df.head())
 
-    
 def progress_and_notification(df, function):
     time = datetime.now().strftime("%H:%M:%S")
     notify_telegram_bot(f'Starting script at {time}.')
@@ -178,8 +144,6 @@ def progress_and_notification(df, function):
     time = datetime.now().strftime("%H:%M:%S")
     notify_telegram_bot(f'Finished script at {time}.')
     return temp
-        
-#blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, None, None, 1, True)
 
 def helper_count_transactions(df, addresses_used, filename):
     '''
@@ -907,8 +871,6 @@ def address_concentration(count_address, count_transactions):
     else:
         return 1 - (((count_address / count_transactions) - (1 / count_transactions)) / (1 - (1 / count_transactions)))
 
-illegal_addresses = dd.read_parquet('illegal_addresses')['address'].compute()
-
 def build_final_data_set(illegal_addresses):
     '''
     This function generates the final data set
@@ -1058,4 +1020,40 @@ def build_final_data_set(illegal_addresses):
     df['illicit'] = df['illicit'].where(df['address'].isin(illegal_addresses), 0)
     file_writer(df, 'final_data_set', feature = False, overwrite = True)
     
+if __name__ == '__main__':
+    # Read paths and list files
+    path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
+    os.chdir(path)
+    files_filepath = os.listdir('C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/')
+    #files_blocks = list(filter(re.compile(r"blocks-.*").match, files_filepath))
+    #files_transactions = list(filter(re.compile(r"transactions-.*").match, files_filepath))
+    files_tx_in = list(filter(re.compile(r"tx_in-.*").match, files_filepath))
+    files_tx_out = list(filter(re.compile(r"tx_out-.*").match, files_filepath))
+
+    # Build dataframe schema
+    block_col = ['block_hash','height','version','blocksize','hashPrev','hashMerkleRoot','nTime','nBits','nNonce']
+    trans_col = ['txid','hashBlock','version','lockTime']
+    tx_in_col = ['txid','hashPrevOut','indexPrevOut','scriptSig','sequence']
+    tx_ou_col = ['txid','indexOut','value','scriptPubKey','address']
+
+    # naming for saving csv file
+    partition_name = '610682-663904'
+
+    # btc exchange rates for 2020
+    btc_exchange_rate_2020 = pd.read_csv('btc_eur_wechselkurs.csv', sep = ';' , thousands='.', decimal=',', usecols = ['Schlusskurs'])
+    btc_exchange_rate_2020 = btc_exchange_rate_2020.set_index(pd.to_datetime(pd.read_csv('btc_eur_wechselkurs.csv', sep = ';', usecols = ['Datum'])['Datum'], dayfirst = True).dt.strftime('%Y-%m-%d'))
+    btc_exchange_rate_2020 = btc_exchange_rate_2020['Schlusskurs'].to_dict()
+
+    # DarkNet Markets
+    darknet_markets = pd.read_csv('DarkNetMarkets.csv', sep = ';', parse_dates = ['Datum'])
+
+    # Adresses used for research (illegal and legal)
+    addresses_used = dd.concat([dd.read_parquet('illegal_addresses'), dd.read_parquet('sample_legal_addresses')], axis = 0).compute()
     
+    #blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 1)
+
+    #transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute() # 53.223 Transaktionen für 2020
+    
+    #blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, None, None, 1, True)
+    
+    illegal_addresses = dd.read_parquet('illegal_addresses')['address'].compute()

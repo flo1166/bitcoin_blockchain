@@ -6,6 +6,7 @@ Created on Sun Oct 15 09:08:51 2023
 """
 
 import dask.dataframe as dd
+from dask.diagnostics import ProgressBar
 import os
 import pandas as pd
 import re
@@ -16,24 +17,6 @@ from create_dataset import file_writer
 import pyarrow as pa
 import numpy as np
 
-# Read paths and list files
-path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
-os.chdir(path)
-files_filepath = os.listdir()
-files_blocks = list(filter(re.compile(r"blocks-.*").match, files_filepath))
-files_transactions = list(filter(re.compile(r"transactions-.*").match, files_filepath))
-files_tx_in = list(filter(re.compile(r"tx_in-.*").match, files_filepath))
-files_tx_out = list(filter(re.compile(r"tx_out-.*").match, files_filepath))
-
-# Build dataframe schema
-block_col = ['block_hash','height','version','blocksize','hashPrev','hashMerkleRoot','nTime','nBits','nNonce']
-trans_col = ['txid','hashBlock','version','lockTime']
-tx_in_col = ['txid','hashPrevOut','indexPrevOut','scriptSig','sequence']
-tx_ou_col = ['txid','indexOut','value','scriptPubKey','address']
-
-# naming for saving csv file
-partition_name = '610682-663904'
-
 def list_walletexplorer(df: pd.Series):
     list_temp = []
 
@@ -43,27 +26,7 @@ def list_walletexplorer(df: pd.Series):
     
     return np.unique(list_temp).tolist()
 
-# illegal wallets
-walletexplorer = pd.read_csv('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\walletexplorer\wallet_explorer_addresses.csv', sep = ',')
-walletexplorer1 = list_walletexplorer(walletexplorer['address_inc'])
-walletexplorer2 = list_walletexplorer(walletexplorer['address_out'])
-walletexplorer_addresses = pd.DataFrame(np.unique(walletexplorer1 + walletexplorer2))
-walletexplorer_addresses.columns = ['address']
-
-illegalWallets = pd.read_csv('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\BABD-13 Bitcoin Address Behavior Dataset\BABD-13.csv', sep = ',')
-illegalWallets = illegalWallets[illegalWallets['label'] == 2]
-illegalWallets = illegalWallets[['account']]
-illegalWallets.columns = ['address']
-
-ofac_hydra = pd.read_excel('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\ofac-sanctioned-digital-currency-addresses\OFAC Hydra List.xlsx')
-ofac_hydra = ofac_hydra[['id']]
-ofac_hydra = ofac_hydra.rename(columns = {'id': 'address'})
-
-illegal_addresses = pd.concat([ofac_hydra, walletexplorer_addresses, illegalWallets], ignore_index = True)
-illegal_addresses = pd.DataFrame(np.unique(illegal_addresses.iloc[:, 0].tolist()))
-illegal_addresses.columns = ['address']
-
-def illegal_address_used(df, illegal_addresses):
+def illegal_address_used(df, illegal_addresses, year = ''):
     '''
     This function generates a file with used illegal addresses for a given dataframe (Runtime: 4h)
 
@@ -84,10 +47,10 @@ def illegal_address_used(df, illegal_addresses):
     boolean = illegal_addresses['address'].isin(df['address'])
     df = illegal_addresses[boolean]
     df.columns = ['address']
-    file_writer(df, 'illegal_addresses_used', feature = False, overwrite = True)
+    file_writer(df, f'illegal_addresses_used{year}', feature = False)
     return boolean
 
-def legal_addresses(df, illegal_addresses):
+def legal_addresses(df, illegal_addresses, year = ''):
     '''
     This function looks up the not as illegal marked addresses, samples and saves them (Runtime: 7h)
 
@@ -104,15 +67,15 @@ def legal_addresses(df, illegal_addresses):
     Writes a file with legal addresses (sample size ~250k addresses)
 
     '''
-    boolean = illegal_address_used(df, illegal_addresses)
+    boolean = illegal_address_used(df, illegal_addresses, year)
     legal_addresses = df[~boolean]
     legal_addresses = legal_addresses.groupby('address')['txid'].count()
     legal_addresses = legal_addresses.reset_index()[['address']]
-    file_writer(legal_addresses, 'legal_addresses', feature = False, overwrite = True)
+    file_writer(legal_addresses, f'legal_addresses{year}', feature = False)
     legal_addresses = legal_addresses.sample(frac = 0.0015, random_state = 190)
-    file_writer(legal_addresses, 'sample_legal_addresses', feature = False, overwrite = True)
+    file_writer(legal_addresses, f'sample_legal_addresses{year}', feature = False)
     
-def txid_used(tx_out, tx_in, illegal_addresses):
+def txid_used(tx_out, tx_out_prev, tx_in, illegal_addresses, year = '', use_legal = True):
     '''
     This function looks up all txids from tx_out and tx_in to be included in this research (Runtime: )
 
@@ -120,6 +83,8 @@ def txid_used(tx_out, tx_in, illegal_addresses):
     ----------
     tx_out : dask.dataframe.core.DataFrame
         With receiver transactions.
+    tx_out_prev : dask.dataframe.core.DataFrame
+        With receiver transactions from previous timeline.
     tx_in : dask.dataframe.core.DataFrame
         With sender transactions.
     illegal_addresses : Series with booleans
@@ -130,28 +95,29 @@ def txid_used(tx_out, tx_in, illegal_addresses):
     A file with used txids is generated
 
     '''
-    tx_out_prev = tx_out[['txid', 'address']]
-    tx_out = tx_out[['txid', 'address']]
-
-    addresses_used = dd.concat([illegal_addresses, dd.read_parquet('sample_legal_addresses')], axis = 0).compute()
+    tx_out_prev = tx_out_prev[['txid', 'index_out', 'address']]
+    tx_out = tx_out[['txid', 'index_out', 'address']]
+    
+    if use_legal:
+        addresses_used = dd.concat([illegal_addresses, dd.read_parquet(f'sample_legal_addresses{year}')], axis = 0).compute()
+    else:
+        addresses_used = illegal_addresses
     
     tx_out = tx_out[tx_out['address'].isin(addresses_used['address'])]
-    tx_out = tx_out[['txid']]
     tx_out_prev = tx_out_prev[tx_out_prev['address'].isin(addresses_used['address'])]
-    tx_out_prev = tx_out_prev[['txid']]
     tx_out_append = dd.concat([tx_out, tx_out_prev], axis = 0)
 
-    file_writer(tx_out_append, 'txid_used', feature = False, overwrite = True)
+    file_writer(tx_out_append, 'temp_tx_out', feature = False)
     
-    txid_used = dd.read_parquet('txid_used').compute()
+    temp_tx_out = dd.read_parquet('temp_tx_out')
     
-    tx_in = tx_in[['hashPrevOut', 'txid']]
-    tx_in = tx_in[tx_in['hashPrevOut'].isin(txid_used['txid'])]
+    tx_in = tx_in.merge(temp_tx_out, left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left')
     tx_in = tx_in[['txid']]
+    tx_out = tx_out[['txid']]
     tx_in = dd.concat([tx_in, tx_out], axis = 0)
-    tx_in.to_parquet('txid_used2')
+    tx_in.to_parquet(f'txid_used_{year}')
     
-def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, files_tx_out: list, i: int):
+def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, files_tx_out: list, i: int, filepath = ''):
     '''
     Reads in big data files with dask of a file directory with iterator (which entries of file directory should be read - e.g. 0 -> first file of transactions, tx_in, tx_out)
 
@@ -178,31 +144,31 @@ def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, 
         dask DataFrame with tx_out.
 
     '''
-    blocks = dd.read_csv(files_blocks[i], 
+    blocks = dd.read_csv(filepath + files_blocks[i], 
                          sep = ';', 
                          names = block_col, 
                          usecols = ['block_hash', 'hashPrev', 'height', 'nTime'], 
                          assume_missing=True)
     
-    transactions = dd.read_csv(files_transactions[i], 
+    transactions = dd.read_csv(filepath + files_transactions[i], 
                                sep = ';', 
                                names = trans_col, 
                                usecols = trans_col[:2], 
                                assume_missing=True)
     
-    tx_in = dd.read_csv(files_tx_in[i], 
+    tx_in = dd.read_csv(filepath + files_tx_in[i], 
                         sep = ';', 
                         names = tx_in_col, 
                         usecols = tx_in_col[:3], 
                         assume_missing=True)
     
-    tx_out = dd.read_csv(files_tx_out[i+1], 
+    tx_out = dd.read_csv(filepath + files_tx_out[i+1], 
                          sep = ';', 
                          names = tx_ou_col, 
                          usecols = [i for i in tx_ou_col if i != 'scriptPubKey'],
                          assume_missing=True)
     
-    tx_out_prev = dd.read_csv(files_tx_out[i], 
+    tx_out_prev = dd.read_csv(filepath + files_tx_out[i], 
                               sep = ';', names = 
                               tx_ou_col, 
                               usecols = [i for i in tx_ou_col if i != 'scriptPubKey'], 
@@ -240,7 +206,7 @@ def helper_csv_to_parquet(filename: str, columnnames: list, usecols: list, schem
         
         file_writer(read_df, 'to_parquet/' + i.replace('.csv', ''), schema = schema, feature = False)  
 
-def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_reward, filename):
+def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_reward, filename, year = ''):
     '''
     This builds the tx_in file with all informations needed (Runtime: 10 Minuten)
 
@@ -267,8 +233,11 @@ def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_r
 
     '''
     #schema = pa.schema([('txid', pa.string()), ('indexOut', pa.float64()), ('value', pa.float64()), ('address', pa.string()), ('nTime', pa.timestamp(unit = 's'))])
-    txid_used = dd.read_parquet('txid_used')
+    txid_used = dd.read_parquet(f'txid_used_{year}')
     txid_used = txid_used['txid'].compute()
+    
+    tx_out_prev = tx_out_prev[tx_out_prev['txid'].isin(txid_used)]
+    tx_out = dd.concat([tx_out, tx_out_prev], axis = 0)
     
     current_df = tx_in[tx_in['txid'].isin(txid_used)]
     current_df = current_df[~current_df['txid'].isin(transactions_reward)]
@@ -397,3 +366,62 @@ def files_parquet(block_col: list, trans_col: list, tx_in_col: list, tx_ou_col: 
         transactions_reward = temp_tx_in[temp_tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute()
         build_tx_in(temp_tx_in, temp_tx_out, temp_tx_out_prev, temp_transactions, temp_blocks, transactions_reward, files_tx_in[i+1].replace('to_parquet/', 'new/'))
         build_tx_out(temp_tx_out, temp_transactions, temp_blocks, transactions_reward, files_tx_out[i+1].replace('to_parquet/', 'new/'))
+        
+if __name__ == '__main__':
+    # Read paths and list files
+    path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
+    os.chdir(path)
+    files_filepath = os.listdir('complete_csv/')
+    files_blocks = list(filter(re.compile(r"blocks-.*").match, files_filepath))
+    files_transactions = list(filter(re.compile(r"transactions-.*").match, files_filepath))
+    files_tx_in = list(filter(re.compile(r"tx_in-.*").match, files_filepath))
+    files_tx_out = list(filter(re.compile(r"tx_out-.*").match, files_filepath))
+
+    # Build dataframe schema
+    block_col = ['block_hash','height','version','blocksize','hashPrev','hashMerkleRoot','nTime','nBits','nNonce']
+    trans_col = ['txid','hashBlock','version','lockTime']
+    tx_in_col = ['txid','hashPrevOut','indexPrevOut','scriptSig','sequence']
+    tx_ou_col = ['txid','indexOut','value','scriptPubKey','address']
+
+    # naming for saving csv file
+    partition_name = '663891-716590'
+    
+    # illegal wallets
+    walletexplorer = pd.read_csv('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\walletexplorer\wallet_explorer_addresses.csv', sep = ',')
+    walletexplorer1 = list_walletexplorer(walletexplorer['address_inc'])
+    walletexplorer2 = list_walletexplorer(walletexplorer['address_out'])
+    walletexplorer_addresses = pd.DataFrame(np.unique(walletexplorer1 + walletexplorer2))
+    walletexplorer_addresses.columns = ['address']
+
+    illegalWallets = pd.read_csv('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\BABD-13 Bitcoin Address Behavior Dataset\BABD-13.csv', sep = ',')
+    illegalWallets = illegalWallets[illegalWallets['label'] == 2]
+    illegalWallets = illegalWallets[['account']]
+    illegalWallets.columns = ['address']
+
+    ofac_hydra = pd.read_excel('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\ofac-sanctioned-digital-currency-addresses\OFAC Hydra List.xlsx')
+    ofac_hydra = ofac_hydra[['id']]
+    ofac_hydra = ofac_hydra.rename(columns = {'id': 'address'})
+
+    illegal_addresses = pd.concat([ofac_hydra, walletexplorer_addresses, illegalWallets], ignore_index = True)
+    illegal_addresses = pd.DataFrame(np.unique(illegal_addresses.iloc[:, 0].tolist()))
+    illegal_addresses.columns = ['address']
+    
+    # read in csv data
+    blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 0, filepath = 'complete_csv/')
+    
+    # find used illegal addresses
+    illegal_address_used(tx_out, illegal_addresses, year = '_2021')
+    
+    # find legal addresses
+    legal_addresses(tx_out, illegal_addresses, year = '_2021')
+    
+    # find used txids
+    txid_used(tx_out, tx_out_prev, tx_in, illegal_addresses, year = '_2021', use_legal = True)
+    
+    # build tx_in combined
+    
+    # build tx_out combined
+    
+    
+    
+    
