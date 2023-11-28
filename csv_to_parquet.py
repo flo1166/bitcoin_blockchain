@@ -36,6 +36,8 @@ def illegal_address_used(df, illegal_addresses, year = ''):
         This is the dataframe which is looked for if collected illegal addresses were used.
     illegal_addresses : DataFrame
         A DataFrame with illegal addresses.
+    year: string
+        Is the name of the data at the end
 
     Returns
     -------
@@ -60,6 +62,8 @@ def legal_addresses(df, illegal_addresses, year = ''):
         This is the dataframe which is looked at for legal addresses.
     illegal_addresses : Series with booleans
         To determine which rows are used
+    year: string
+        Is the name of the data at the end
 
     Returns
     -------
@@ -67,7 +71,8 @@ def legal_addresses(df, illegal_addresses, year = ''):
     Writes a file with legal addresses (sample size ~250k addresses)
 
     '''
-    boolean = illegal_address_used(df, illegal_addresses, year)
+    df = df[['address', 'txid']].repartition(500)
+    boolean = df['address'].isin(illegal_addresses['address'])
     legal_addresses = df[~boolean]
     legal_addresses = legal_addresses.groupby('address')['txid'].count()
     legal_addresses = legal_addresses.reset_index()[['address']]
@@ -89,17 +94,19 @@ def txid_used(tx_out, tx_out_prev, tx_in, illegal_addresses, year = '', use_lega
         With sender transactions.
     illegal_addresses : Series with booleans
         To determine which rows are used
+    year: string
+        Is the name of the data at the end
 
     Returns
     -------
     A file with used txids is generated
 
     '''
-    tx_out_prev = tx_out_prev[['txid', 'index_out', 'address']]
-    tx_out = tx_out[['txid', 'index_out', 'address']]
+    tx_out_prev = tx_out_prev[['txid', 'indexOut', 'address']]
+    tx_out = tx_out[['txid', 'indexOut', 'address']]
     
     if use_legal:
-        addresses_used = dd.concat([illegal_addresses, dd.read_parquet(f'sample_legal_addresses{year}')], axis = 0).compute()
+        addresses_used = dd.concat([dd.read_parquet(f'illegal_addresses_used{year}'), dd.read_parquet(f'sample_legal_addresses{year}')], axis = 0).compute()
     else:
         addresses_used = illegal_addresses
     
@@ -111,12 +118,13 @@ def txid_used(tx_out, tx_out_prev, tx_in, illegal_addresses, year = '', use_lega
     
     temp_tx_out = dd.read_parquet('temp_tx_out')
     
-    tx_in = tx_in.merge(temp_tx_out, left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'left')
-    tx_in = tx_in[['txid']]
+    tx_in = tx_in.merge(temp_tx_out, left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'inner')
+    tx_in = tx_in[['txid_y']]
+    tx_in = tx_in.rename(columns = {'txid_y': 'txid'})
     tx_out = tx_out[['txid']]
     tx_in = dd.concat([tx_in, tx_out], axis = 0)
-    tx_in.to_parquet(f'txid_used_{year}')
-    
+    tx_in.to_parquet(f'txid_used{year}')
+
 def filereader(files_blocks: list, files_transactions: list, files_tx_in: list, files_tx_out: list, i: int, filepath = ''):
     '''
     Reads in big data files with dask of a file directory with iterator (which entries of file directory should be read - e.g. 0 -> first file of transactions, tx_in, tx_out)
@@ -233,10 +241,11 @@ def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_r
 
     '''
     #schema = pa.schema([('txid', pa.string()), ('indexOut', pa.float64()), ('value', pa.float64()), ('address', pa.string()), ('nTime', pa.timestamp(unit = 's'))])
-    txid_used = dd.read_parquet(f'txid_used_{year}')
+    txid_used = dd.read_parquet(f'txid_used{year}')
     txid_used = txid_used['txid'].compute()
     
     tx_out_prev = tx_out_prev[tx_out_prev['txid'].isin(txid_used)]
+    tx_out = tx_out[tx_out['txid'].isin(txid_used)]
     tx_out = dd.concat([tx_out, tx_out_prev], axis = 0)
     
     current_df = tx_in[tx_in['txid'].isin(txid_used)]
@@ -254,7 +263,7 @@ def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_r
     
     file_writer(current_df, filename, feature = False)
 
-def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
+def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename, year = ''):
     '''
     This builds the tx_in file with all informations needed (Runtime: 6 Minuten)
 
@@ -276,7 +285,7 @@ def build_tx_out(tx_out, transactions, blocks, transactions_reward, filename):
     Files saved in tx_out_filesplit
 
     '''
-    txid_used = dd.read_parquet('txid_used')
+    txid_used = dd.read_parquet(f'txid_used{year}')
     txid_used = txid_used['txid'].compute()
     
     current_df = tx_out[tx_out['txid'].isin(txid_used)]
@@ -419,9 +428,11 @@ if __name__ == '__main__':
     txid_used(tx_out, tx_out_prev, tx_in, illegal_addresses, year = '_2021', use_legal = True)
     
     # build tx_in combined
+    transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute()
+    build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_reward, 'tx_in-663891-716590', year = '_2021')
     
     # build tx_out combined
-    
+    build_tx_out(tx_out, transactions, blocks, transactions_reward, 'tx_out-663891-716590', year = '_2021')
     
     
     

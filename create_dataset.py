@@ -1037,7 +1037,7 @@ if __name__ == '__main__':
     tx_ou_col = ['txid','indexOut','value','scriptPubKey','address']
 
     # naming for saving csv file
-    partition_name = '610682-663904'
+    partition_name = '663891-716590'
 
     # btc exchange rates for 2020
     btc_exchange_rate_2020 = pd.read_csv('btc_eur_wechselkurs.csv', sep = ';' , thousands='.', decimal=',', usecols = ['Schlusskurs'])
@@ -1051,9 +1051,23 @@ if __name__ == '__main__':
     addresses_used = dd.concat([dd.read_parquet('illegal_addresses'), dd.read_parquet('sample_legal_addresses')], axis = 0).compute()
     
     #blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 1)
-
+    
     #transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute() # 53.223 Transaktionen für 2020
     
     #blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, None, None, 1, True)
     
     illegal_addresses = dd.read_parquet('illegal_addresses')['address'].compute()
+    
+    tx_in, tx_out = filereader(None, None, files_tx_in, files_tx_out, 0)
+    
+    with ProgressBar():
+        count_transactions(tx_in, tx_out, addresses_used, partition_name)
+        lifetime_address(tx_in, tx_out, addresses_used, partition_name)
+        sum_transaction_value_btc(tx_in, tx_out, addresses_used, partition_name, euro = False)
+        sum_transaction_value_btc(tx_in, tx_out, addresses_used, partition_name, euro = True)
+        min_max_std_transaction_value_btc(tx_in, tx_out, addresses_used, partition_name)
+        transaction_fee(tx_in, tx_out, addresses_used, partition_name)
+        time_transactions(tx_in, tx_out, addresses_used, partition_name)
+        count_addresses(tx_in, tx_out, addresses_used, partition_name)
+        balance(tx_in, tx_out, addresses_used, partition_name)
+        count_addresses_per_transaction(tx_in, tx_out, addresses_used, partition_name)
