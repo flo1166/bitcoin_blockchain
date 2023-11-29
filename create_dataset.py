@@ -213,6 +213,7 @@ def count_transactions(tx_in, tx_out, addresses_used, partition_name):
     df_receiver_equal_sender = df_receiver_equal_sender.reset_index()
     df_receiver_equal_sender = df_receiver_equal_sender.groupby('address_x')['count_receiver_equal_sender_transactions'].sum()
     df_receiver_equal_sender = df_receiver_equal_sender.reset_index()
+    df_receiver_equal_sender = df_receiver_equal_sender.rename(columns = {'address_x': 'address'})
     df_receiver_equal_sender = df_receiver_equal_sender[df_receiver_equal_sender['address'].isin(addresses_used['address'])]
     file_writer(df_receiver_equal_sender, filename_equal)
 
@@ -1071,3 +1072,4 @@ if __name__ == '__main__':
         count_addresses(tx_in, tx_out, addresses_used, partition_name)
         balance(tx_in, tx_out, addresses_used, partition_name)
         count_addresses_per_transaction(tx_in, tx_out, addresses_used, partition_name)
+        active_darknet_markets(tx_in, tx_out, darknet_markets, addresses_used, partition_name)
