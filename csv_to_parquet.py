@@ -119,8 +119,8 @@ def txid_used(tx_out, tx_out_prev, tx_in, illegal_addresses, year = '', use_lega
     temp_tx_out = dd.read_parquet('temp_tx_out')
     
     tx_in = tx_in.merge(temp_tx_out, left_on = ['hashPrevOut', 'indexPrevOut'], right_on = ['txid', 'indexOut'], how = 'inner')
-    tx_in = tx_in[['txid_y']]
-    tx_in = tx_in.rename(columns = {'txid_y': 'txid'})
+    tx_in = tx_in[['txid_x']]
+    tx_in = tx_in.rename(columns = {'txid_x': 'txid'})
     tx_out = tx_out[['txid']]
     tx_in = dd.concat([tx_in, tx_out], axis = 0)
     tx_in.to_parquet(f'txid_used{year}')
@@ -243,9 +243,7 @@ def build_tx_in(tx_in, tx_out, tx_out_prev, transactions, blocks, transactions_r
     #schema = pa.schema([('txid', pa.string()), ('indexOut', pa.float64()), ('value', pa.float64()), ('address', pa.string()), ('nTime', pa.timestamp(unit = 's'))])
     txid_used = dd.read_parquet(f'txid_used{year}')
     txid_used = txid_used['txid'].compute()
-    
-    tx_out_prev = tx_out_prev[tx_out_prev['txid'].isin(txid_used)]
-    tx_out = tx_out[tx_out['txid'].isin(txid_used)]
+
     tx_out = dd.concat([tx_out, tx_out_prev], axis = 0)
     
     current_df = tx_in[tx_in['txid'].isin(txid_used)]

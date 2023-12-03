@@ -247,7 +247,7 @@ def lifetime_address(tx_in, tx_out, addresses_used, partition_name):
     df = df.reset_index()
     df['max'] = df['max'].dt.ceil(freq = 'D')
     df['min'] = df['min'].dt.floor(freq = 'D')
-    df['lifetime'] = (df['max'] - df['min']).dt.days
+    df['lifetime'] = (df['max'] - df['min']).dt.minutes
     df = df[['address', 'lifetime']]
     df = df[df['address'].isin(addresses_used['address'])]
     file_writer(df, filename)
@@ -528,7 +528,7 @@ def helper_time_transactions(df, addresses_used, filename):
     df = df[['address', 'nTime']]
     df = df.groupby('address')['nTime'].apply(lambda x: (x.sort_values().diff()) / pd.Timedelta(minutes=1))
     df = df.reset_index()
-    file_writer(df, 'temp_df_time_transactions', feature = False, overwrite = True)
+    file_writer(df, 'temp_df_time_transactions', feature = False)
     df = dd.read_parquet('temp_df_time_transactions')
     df = df.rename(columns = {'nTime': 'time_between_transactions'})
     df = df.groupby('address')['time_between_transactions'].aggregate(['mean', 'std'])
@@ -619,7 +619,7 @@ def addresses_per_txid(df):
     schema = pa.schema([('index', pa.string()), ('address', pa.list_(pa.string()))])
     df = df.groupby('txid')['address'].apply(list, meta = ('address', 'object'))
     df = df.reset_index()
-    file_writer(df, 'temp_adresses_per_txid', schema = schema, feature = False, overwrite = True)
+    file_writer(df, 'temp_adresses_per_txid', schema = schema, feature = False)
     return dd.read_parquet('temp_adresses_per_txid')
 
 def helper_count_addresses(df, df2, addresses_used, filename):
@@ -872,37 +872,38 @@ def address_concentration(count_address, count_transactions):
     else:
         return 1 - (((count_address / count_transactions) - (1 / count_transactions)) / (1 - (1 / count_transactions)))
 
-def build_final_data_set(illegal_addresses):
+def build_final_data_set(illegal_addresses, partition_name):
     '''
-    This function generates the final data set
+    This function generates the final data set (Runtime: )
 
     Parameters
     ----------
     illegal_addresses : Series
         All illegal addresses for this research.
-        
+    partition_name : The height of the blocks for the investigated month
+    
     Returns
     -------
     File with all features
 
     '''
-    count_address = dd.read_parquet('features/count_addresses_all_610682-663904')
+    count_address = dd.read_parquet(f'features/count_addresses_all_{partition_name}')
     count_address = count_address.rename(columns = {'count_unique_addresses': 'count_addresses'})
-    count_address_sender = dd.read_parquet('features/count_addresses_sender_610682-663904')
+    count_address_sender = dd.read_parquet(f'features/count_addresses_sender_{partition_name}')
     count_address_sender = count_address_sender.rename(columns = {'count_unique_addresses': 'count_addresses_sender'})
-    count_address_receiver = dd.read_parquet('features/count_addresses_receiver_610682-663904')
+    count_address_receiver = dd.read_parquet(f'features/count_addresses_receiver_{partition_name}')
     count_address_receiver = count_address_receiver.rename(columns = {'count_unique_addresses': 'count_addresses_receiver'})
     
     df = count_address.merge(count_address_sender, on = 'index', how = 'outer')
     df = df.merge(count_address_receiver, on = 'index', how = 'outer')
     df = df.rename(columns = {'index': 'address'})
     
-    count_transactions = dd.read_parquet('features/count_transactions_610682-663904')
-    count_transactions_sender = dd.read_parquet('features/count_sender_transactions_610682-663904')
+    count_transactions = dd.read_parquet(f'features/count_transactions_{partition_name}')
+    count_transactions_sender = dd.read_parquet(f'features/count_sender_transactions_{partition_name}')
     count_transactions_sender = count_transactions_sender.rename(columns = {'count_transactions': 'count_transactions_sender'})
-    count_transactions_receiver = dd.read_parquet('features/count_receiver_transactions_610682-663904')
+    count_transactions_receiver = dd.read_parquet(f'features/count_receiver_transactions_{partition_name}')
     count_transactions_receiver = count_transactions_receiver.rename(columns = {'count_transactions': 'count_transactions_receiver'})
-    count_transactions_equal = dd.read_parquet('features/count_receiver_eqal_sender_transactions_610682-663904')
+    count_transactions_equal = dd.read_parquet(f'features/count_receiver_eqal_sender_transactions_{partition_name}')
     count_transactions_equal = count_transactions_equal.rename(columns = {'count_receiver_equal_sender_transactions': 'count_transactions_s_equal_r'})
     
     df = df.merge(count_transactions, on = 'address', how = 'outer')
@@ -910,25 +911,25 @@ def build_final_data_set(illegal_addresses):
     df = df.merge(count_transactions_receiver, on = 'address', how = 'outer')
     df = df.merge(count_transactions_equal, on = 'address', how = 'outer')
     
-    darknet_markets = dd.read_parquet('features/darknet_markets_610682-663904')
+    darknet_markets = dd.read_parquet(f'features/darknet_markets_{partition_name}')
     
     df = df.merge(darknet_markets, on = 'address', how = 'outer')
     
-    lifetime = dd.read_parquet('features/lifetime_address_610682-663904')
+    lifetime = dd.read_parquet(f'features/lifetime_address_{partition_name}')
     
     df = df.merge(lifetime, on = 'address', how = 'outer')
     
-    transaction_value = dd.read_parquet('features/max_min_std_transaction_value_all_610682-663904')
+    transaction_value = dd.read_parquet(f'features/max_min_std_transaction_value_all_{partition_name}')
     transaction_value = transaction_value.rename(columns = {'address_': 'address', 
                                                             'value_min': 'min_transaction_value', 
                                                             'value_max': 'max_transaction_value',
                                                             'value_std': 'std_transaction_value'})
-    transaction_value_sender = dd.read_parquet('features/max_min_std_transaction_value_sender_610682-663904')
+    transaction_value_sender = dd.read_parquet(f'features/max_min_std_transaction_value_sender_{partition_name}')
     transaction_value_sender = transaction_value_sender.rename(columns = {'address_': 'address',
                                                                           'value_min': 'min_transaction_value_sender',
                                                                           'value_max': 'max_transaction_value_sender',
                                                                           'value_std': 'std_transaction_value_sender'})
-    transaction_value_receiver = dd.read_parquet('features/max_min_std_transaction_value_receiver_610682-663904')
+    transaction_value_receiver = dd.read_parquet(f'features/max_min_std_transaction_value_receiver_{partition_name}')
     transaction_value_receiver = transaction_value_receiver.rename(columns = {'address_': 'address',
                                                                               'value_min': 'min_transaction_value_receiver',
                                                                               'value_max': 'max_transaction_value_receiver',
@@ -938,12 +939,12 @@ def build_final_data_set(illegal_addresses):
     df = df.merge(transaction_value_sender, on = 'address', how = 'outer')
     df = df.merge(transaction_value_receiver, on = 'address', how = 'outer')
     
-    balance = dd.read_parquet('features/mean_and_std_balance_610682-663904')
+    balance = dd.read_parquet(f'features/mean_and_std_balance_{partition_name}')
     balance = balance.reset_index()
     balance = balance.rename(columns = {'mean': 'mean_balance', 'std': 'std_balance'})
     df = df.merge(balance, on = 'address', how = 'outer')
     
-    addresses_per_transaction = dd.read_parquet('features/mean_min_max_std_addresses_per_transaction_610682-663904')
+    addresses_per_transaction = dd.read_parquet(f'features/mean_min_max_std_addresses_per_transaction_{partition_name}')
     addresses_per_transaction = addresses_per_transaction.reset_index()
     addresses_per_transaction = addresses_per_transaction.rename(columns = {'count_address_sender_mean': 'mean_addresses_per_transaction_sender',
                                                                             'count_address_sender_min': 'min_addresses_per_transaction_sender',
@@ -959,17 +960,17 @@ def build_final_data_set(illegal_addresses):
                                                                             'count_address_std': 'std_addresses_per_transaction'})
     df = df.merge(addresses_per_transaction, on = 'address', how = 'outer')
     
-    transaction_volume = dd.read_parquet('features/sum_transaction_value_all_610682-663904')
+    transaction_volume = dd.read_parquet(f'features/sum_transaction_value_all_{partition_name}')
     transaction_volume = transaction_volume.rename(columns = {'sum_trans_value_btc': 'transaction_volume_btc'})
-    transaction_volume_sender = dd.read_parquet('features/sum_transaction_value_sender_610682-663904')
+    transaction_volume_sender = dd.read_parquet(f'features/sum_transaction_value_sender_{partition_name}')
     transaction_volume_sender = transaction_volume_sender.rename(columns = {'sum_trans_value_btc': 'transaction_volume_sender_btc'})
-    transaction_volume_receiver = dd.read_parquet('features/sum_transaction_value_receiver_610682-663904')
+    transaction_volume_receiver = dd.read_parquet(f'features/sum_transaction_value_receiver_{partition_name}')
     transaction_volume_receiver = transaction_volume_receiver.rename(columns = {'sum_trans_value_btc': 'transaction_volume_receiver_btc'})
-    transaction_volume_euro = dd.read_parquet('features/sum_transaction_value_all_euro_610682-663904')
+    transaction_volume_euro = dd.read_parquet(f'features/sum_transaction_value_all_euro_{partition_name}')
     transaction_volume_euro = transaction_volume_euro.rename(columns = {'sum_trans_value_euro': 'transaction_volume_euro'})
-    transaction_volume_sender_euro = dd.read_parquet('features/sum_transaction_value_sender_euro_610682-663904')
+    transaction_volume_sender_euro = dd.read_parquet(f'features/sum_transaction_value_sender_euro_{partition_name}')
     transaction_volume_sender_euro = transaction_volume_sender_euro.rename(columns = {'sum_trans_value_euro': 'transaction_volume_sender_euro'})
-    transaction_volume_receiver_euro = dd.read_parquet('features/sum_transaction_value_receiver_euro_610682-663904')
+    transaction_volume_receiver_euro = dd.read_parquet(f'features/sum_transaction_value_receiver_euro_{partition_name}')
     transaction_volume_receiver_euro = transaction_volume_receiver_euro.rename(columns = {'sum_trans_value_euro': 'transaction_volume_receiver_euro'})
     df = df.merge(transaction_volume, on = 'address', how = 'outer')
     df = df.merge(transaction_volume_sender, on = 'address', how = 'outer')
@@ -978,23 +979,23 @@ def build_final_data_set(illegal_addresses):
     df = df.merge(transaction_volume_sender_euro, on = 'address', how = 'outer')
     df = df.merge(transaction_volume_receiver_euro, on = 'address', how = 'outer')
     
-    transaction_fees = dd.read_parquet('features/transaction_fee_610682-663904')
+    transaction_fees = dd.read_parquet(f'features/transaction_fee_{partition_name}')
     transaction_fees = transaction_fees.rename(columns = {'fee': 'transaction_fee'})
-    transaction_fees_sender = dd.read_parquet('features/transaction_fee_sender_610682-663904')
+    transaction_fees_sender = dd.read_parquet(f'features/transaction_fee_sender_{partition_name}')
     transaction_fees_sender = transaction_fees_sender.rename(columns = {'fee': 'transaction_fee_sender'})
-    transactions_fees_receiver = dd.read_parquet('features/transaction_fee_receiver_610682-663904')
+    transactions_fees_receiver = dd.read_parquet(f'features/transaction_fee_receiver_{partition_name}')
     transactions_fees_receiver = transactions_fees_receiver.rename(columns = {'fee': 'transaction_fee_receiver'})
     df = df.merge(transaction_fees, on = 'address', how = 'outer')
     df = df.merge(transaction_fees_sender, on = 'address', how = 'outer')
     df = df.merge(transactions_fees_receiver, on = 'address', how = 'outer')
     
-    transaction_time_diff = dd.read_parquet('features/transaction_time_diff_610682-663904')
+    transaction_time_diff = dd.read_parquet(f'features/transaction_time_diff_{partition_name}')
     transaction_time_diff = transaction_time_diff.rename(columns = {'mean': 'mean_time_diff_transaction',
                                                                     'std': 'std_time_diff_transaction'})
-    transaction_time_diff_sender = dd.read_parquet('features/transaction_time_diff_sender_610682-663904')
+    transaction_time_diff_sender = dd.read_parquet(f'features/transaction_time_diff_sender_{partition_name}')
     transaction_time_diff_sender = transaction_time_diff_sender.rename(columns = {'mean': 'mean_time_diff_transaction_sender',
                                                                     'std': 'std_time_diff_transaction_sender'})
-    transaction_time_diff_receiver = dd.read_parquet('features/transaction_time_diff_receiver_610682-663904')
+    transaction_time_diff_receiver = dd.read_parquet(f'features/transaction_time_diff_receiver_{partition_name}')
     transaction_time_diff_receiver = transaction_time_diff_receiver.rename(columns = {'mean': 'mean_time_diff_transaction_receiver',
                                                                     'std': 'std_time_diff_transaction_receiver'})
     df = df.merge(transaction_time_diff, on = 'address', how = 'outer')
@@ -1019,7 +1020,7 @@ def build_final_data_set(illegal_addresses):
     # Target variable
     df['illicit'] = 1 
     df['illicit'] = df['illicit'].where(df['address'].isin(illegal_addresses), 0)
-    file_writer(df, 'final_data_set', feature = False, overwrite = True)
+    file_writer(df, f'final_data_set_{partition_name}', feature = False)
     
 if __name__ == '__main__':
     # Read paths and list files
@@ -1049,15 +1050,16 @@ if __name__ == '__main__':
     darknet_markets = pd.read_csv('DarkNetMarkets.csv', sep = ';', parse_dates = ['Datum'])
 
     # Adresses used for research (illegal and legal)
-    addresses_used = dd.concat([dd.read_parquet('illegal_addresses'), dd.read_parquet('sample_legal_addresses')], axis = 0).compute()
+    addresses_used = dd.concat([dd.read_parquet('illegal_addresses_used_2021'), dd.read_parquet('sample_legal_addresses_2021')], axis = 0).compute()
     
     #blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, files_tx_in, files_tx_out, 1)
+    tx_in, tx_out = filereader(None, None, files_tx_in, files_tx_out, 0)
     
     #transactions_reward = tx_in[tx_in['hashPrevOut'] == '0000000000000000000000000000000000000000000000000000000000000000']['txid'].compute() # 53.223 Transaktionen für 2020
     
     #blocks, transactions, tx_in, tx_out, tx_out_prev = filereader(files_blocks, files_transactions, None, None, 1, True)
     
-    illegal_addresses = dd.read_parquet('illegal_addresses')['address'].compute()
+    illegal_addresses = dd.read_parquet('illegal_addresses_used_2021')['address'].compute()
     
     tx_in, tx_out = filereader(None, None, files_tx_in, files_tx_out, 0)
     
