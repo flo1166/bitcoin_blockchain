@@ -10,7 +10,7 @@ from dask.diagnostics import ProgressBar
 import os
 import pandas as pd
 import re
-path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/githubrepo/'
+path = 'FILEPATH'
 os.chdir(path)
 from notifier import notify_telegram_bot
 from create_dataset import file_writer
@@ -376,7 +376,7 @@ def files_parquet(block_col: list, trans_col: list, tx_in_col: list, tx_ou_col: 
         
 if __name__ == '__main__':
     # Read paths and list files
-    path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
+    path = 'FILEPATH'
     os.chdir(path)
     files_filepath = os.listdir('complete_csv/')
     files_blocks = list(filter(re.compile(r"blocks-.*").match, files_filepath))
@@ -400,12 +400,12 @@ if __name__ == '__main__':
     walletexplorer_addresses = pd.DataFrame(np.unique(walletexplorer1 + walletexplorer2))
     walletexplorer_addresses.columns = ['address']
 
-    illegalWallets = pd.read_csv('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\BABD-13 Bitcoin Address Behavior Dataset\BABD-13.csv', sep = ',')
+    illegalWallets = pd.read_csv('FILEPATH', sep = ',')
     illegalWallets = illegalWallets[illegalWallets['label'] == 2]
     illegalWallets = illegalWallets[['account']]
     illegalWallets.columns = ['address']
 
-    ofac_hydra = pd.read_excel('C:\Eigene Dateien\Masterarbeit\FraudDetection\Daten\Illegal Wallets\ofac-sanctioned-digital-currency-addresses\OFAC Hydra List.xlsx')
+    ofac_hydra = pd.read_excel('FILEPATH')
     ofac_hydra = ofac_hydra[['id']]
     ofac_hydra = ofac_hydra.rename(columns = {'id': 'address'})
 
