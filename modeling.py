@@ -22,7 +22,7 @@ from mlxtend.feature_selection import SequentialFeatureSelector as sfs
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_validate, GridSearchCV
 
 import os
-path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/githubrepo/'
+path = 'FILEPATH'
 os.chdir(path)
 from evaluation import scoring_manuel
 from notifier import notify_telegram_bot
@@ -369,7 +369,7 @@ def test_score_finetuned_models0(models0, X_train, y_train, X_test, y_test):
         
 if __name__ == '__main__':
     # Read Data
-    path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
+    path = 'FILEPATH'
     os.chdir(path)
     df = pd.read_parquet('final_data_set')
     
