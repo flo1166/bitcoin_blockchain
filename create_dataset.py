@@ -6,7 +6,7 @@ from datetime import datetime
 from dask.diagnostics import ProgressBar
 import itertools
 import glob
-path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/githubrepo/'
+path = 'FILEPATH'
 os.chdir(path)
 from notifier import notify_telegram_bot
 import pyarrow as pa
@@ -1024,9 +1024,9 @@ def build_final_data_set(illegal_addresses, partition_name):
     
 if __name__ == '__main__':
     # Read paths and list files
-    path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
+    path = 'FILEPATH'
     os.chdir(path)
-    files_filepath = os.listdir('C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/')
+    files_filepath = os.listdir('FILEPATH')
     #files_blocks = list(filter(re.compile(r"blocks-.*").match, files_filepath))
     #files_transactions = list(filter(re.compile(r"transactions-.*").match, files_filepath))
     files_tx_in = list(filter(re.compile(r"tx_in-.*").match, files_filepath))
