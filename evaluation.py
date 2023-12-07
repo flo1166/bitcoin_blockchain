@@ -154,11 +154,11 @@ def addresses_per_address(tx_in2, tx_out2, bool_2021):
     df = df[df['address'].isin(addresses_used['address'])]
     df = df.merge(address_per_txid, left_on = 'txid', right_on = 'index', how = 'left')
     df = df.groupby('address_x')['address_y'].apply(list, meta = ('count_unique_addresses', 'object'))
-    df = df.apply(lambda x: set(list(itertools.chain(*x))), meta=('count_unique_addresses', 'object'))
+    df = df.apply(lambda x: list(itertools.chain(*x)), meta=('count_unique_addresses', 'object'))
     df = df.reset_index()
     df.to_parquet('temp_addresses_per_address', engine = 'pyarrow', schema = schema)
     
-    return dd.read_parquet('temp_addresses_per_address')
+    return dd.read_parquet('temp_addresses_per_address').compute()
 
 def smart_local_moving(X_train, df_ml, tx_in, tx_out, bool_2021, schwellenwerte = [0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5], suffix = 'training'):
     '''
@@ -183,7 +183,7 @@ def smart_local_moving(X_train, df_ml, tx_in, tx_out, bool_2021, schwellenwerte 
 
     '''
     df = df_ml.iloc[X_train.index, :]
-    df = df.loc[:, ['count_transactions', 'illicit']]
+    df = df.loc[:, ['illicit']]
     df['pred'] = df['illicit'].copy()
     
     df_addresses_per_address = addresses_per_address(tx_in, tx_out, bool_2021)
@@ -191,22 +191,31 @@ def smart_local_moving(X_train, df_ml, tx_in, tx_out, bool_2021, schwellenwerte 
     df = df.reset_index()
     df = df.merge(df_addresses_per_address, left_on = 'address', right_on = 'index', how = 'left')
     df = df.drop(columns = ['index'])
+    df['count_unique_addresses'] = df.apply(lambda x: [i for i in list(x['count_unique_addresses']) if i is not None and i not in x['address']], axis = 1)
+    df['count_transactions'] = df['count_unique_addresses'].apply(lambda x: len(x))
     df = df.set_index('address')
+    
+    sum_equal = 0
+    
     for schwellenwert in schwellenwerte:
         changed = True
         df2 = df.copy()
+        sum_equal_count = 0
         while changed:
             changed = False
             temp_dict = df2['pred'].to_dict()
             df2['count_transaction_illegal'] = df2['count_unique_addresses'].copy()
-            df2['count_transaction_illegal'] = df2['count_transaction_illegal'].apply(lambda x: list(x))
             df2['count_transaction_illegal'] = df2['count_transaction_illegal'].apply(lambda x: [temp_dict[item] if (item != None and item in temp_dict.keys()) else None for item in x].count(1) if type(x) == list else None)
             df2['pred2'] = df2['count_transaction_illegal'] / df2['count_transactions']
             df2 = df2.drop(columns = 'count_transaction_illegal')
             df2['pred2'] = df2['pred2'].apply(lambda x: 0 if x < schwellenwert else 1)
-            if (df2['pred'].equals(df2['pred2'])) == False:
+            if (((df2['pred'].equals(df2['pred2'])) == False) and (sum_equal_count < 4)):
                 changed = True
-                print(sum(df2['pred'] == df2['pred2']))
+                sum_equal_prev = sum_equal
+                sum_equal = sum(df2['pred'] == df2['pred2'])
+                if sum_equal_prev == sum_equal:
+                    sum_equal_count += 1
+                print(sum_equal)
                 df2['pred'] = df2['pred2']
     
             print(changed, datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S"))
@@ -447,20 +456,20 @@ if __name__ == '__main__':
     stacked_model3.fit(X_train_2020, y_train_2020)
     stacked_model4.fit(X_train_2020, y_train_2020)
     
-    y_pred_stacked = stacked_model.predict(df_ml_2021.loc[:, ~df_ml_2021.columns.isin(['illicit'])])
-    y_pred_stacked1 = stacked_model1.predict(df_ml_2021.loc[:, ~df_ml_2021.columns.isin(['illicit'])])
-    y_pred_stacked2 = stacked_model2.predict(df_ml_2021.loc[:, ~df_ml_2021.columns.isin(['illicit'])])
-    y_pred_stacked3 = stacked_model3.predict(df_ml_2021.loc[:, ~df_ml_2021.columns.isin(['illicit'])])
-    y_pred_stacked4 = stacked_model4.predict(df_ml_2021.loc[:, ~df_ml_2021.columns.isin(['illicit'])])
-    scored_stacked_model = scoring_manuel(y_pred_stacked, df_ml_2021['illicit'])
+    y_pred_stacked = stacked_model.predict(df_2021.loc[:, ~df_2021.columns.isin(['illicit'])])
+    y_pred_stacked1 = stacked_model1.predict(df_2021.loc[:, ~df_2021.columns.isin(['illicit'])])
+    y_pred_stacked2 = stacked_model2.predict(df_2021.loc[:, ~df_2021.columns.isin(['illicit'])])
+    y_pred_stacked3 = stacked_model3.predict(df_2021.loc[:, ~df_2021.columns.isin(['illicit'])])
+    y_pred_stacked4 = stacked_model4.predict(df_2021.loc[:, ~df_2021.columns.isin(['illicit'])])
+    scored_stacked_model = scoring_manuel(y_pred_stacked, df_2021['illicit'])
     scored_stacked_model.to_excel(f'plots/stacking/final_stacking_model_performance_test_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}_DT_KNN_XGB.xlsx')
-    scored_stacked_model = scoring_manuel(y_pred_stacked1, df_ml_2021['illicit'])
+    scored_stacked_model = scoring_manuel(y_pred_stacked1, df_2021['illicit'])
     scored_stacked_model.to_excel(f'plots/stacking/final_stacking_model_performance_test_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}_KNN_AB_XGB.xlsx')
-    scored_stacked_model = scoring_manuel(y_pred_stacked2, df_ml_2021['illicit'])
+    scored_stacked_model = scoring_manuel(y_pred_stacked2, df_2021['illicit'])
     scored_stacked_model.to_excel(f'plots/stacking/final_stacking_model_performance_test_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}_DT_AB_XGB.xlsx')
-    scored_stacked_model = scoring_manuel(y_pred_stacked3, df_ml_2021['illicit'])
+    scored_stacked_model = scoring_manuel(y_pred_stacked3, df_2021['illicit'])
     scored_stacked_model.to_excel(f'plots/stacking/final_stacking_model_performance_test_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}_KNN_RF_XGB.xlsx')
-    scored_stacked_model = scoring_manuel(y_pred_stacked4, df_ml_2021['illicit'])
+    scored_stacked_model = scoring_manuel(y_pred_stacked4, df_2021['illicit'])
     scored_stacked_model.to_excel(f'plots/stacking/final_stacking_model_performance_test_{datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S")}_DT_RF_XGB.xlsx')
 
     # Feature Importance Stacking Model
