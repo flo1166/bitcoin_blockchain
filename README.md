@@ -26,3 +26,5 @@ conda env create -n ENVIRONMENTNAME -f environment2.yml
 ```
 It is important to do the steps in the order of the structure (see above)
 
+## License
+This project is licensed under the CC BY-NC-ND 4.0 Deed Attribution-NonCommercial-NoDerivs 4.0 International.
