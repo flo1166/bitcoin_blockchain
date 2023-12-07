@@ -17,7 +17,7 @@ from sklearn.ensemble import StackingClassifier, AdaBoostClassifier, RandomFores
 import xgboost as xgb
 
 import os
-path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/githubrepo/'
+path = 'FILEPATH'
 os.chdir(path)
 import pandas as pd
 import numpy as np
@@ -292,7 +292,7 @@ if __name__ == '__main__':
     from modeling import build_data
     from create_dataset import addresses_per_txid
     # Read Data
-    path = 'C:/Eigene Dateien/Masterarbeit/FraudDetection/Daten/tx_out_filesplit/'
+    path = 'FILEPATH'
     os.chdir(path)
     df_2020 = pd.read_parquet('final_data_set_610682-663904')
     df_2021 = pd.read_parquet('final_data_set_663891-716590')
